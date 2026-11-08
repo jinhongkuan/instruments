@@ -1,6 +1,6 @@
 import { Schema } from 'effect'
 
-import { InstrumentKind, InstrumentSupport, Resolved } from './instrument/common'
+import { CarryKind, InstrumentKind, InstrumentSupport, Resolved } from './instrument/common'
 
 /** The three ways to hold leveraged long exposure. Rows of the README table. */
 export const INSTRUMENT_KINDS: ReadonlyArray<InstrumentKind> = ['Perp', 'SpotBorrow', 'Option']
@@ -22,11 +22,32 @@ export const SeriesPoint = Schema.Struct({
 })
 export type SeriesPoint = typeof SeriesPoint.Type
 
+/**
+ * PnL per unit of capital at the horizon for one terminal price ratio. Carry
+ * shifts the curve vertically; when carry is floating, the shift is uncertain,
+ * so low/high bound a band and mid is the median. Fixed and prepaid carry
+ * collapse the band to the line (low = mid = high).
+ */
 export const PayoffPoint = Schema.Struct({
   terminalPriceRatio: Schema.Number,
-  pnlPctOfCapital: Schema.Number,
+  /** PnL before any carry: the pure price leg. */
+  beforeCarry: Schema.Number,
+  low: Schema.Number,
+  mid: Schema.Number,
+  high: Schema.Number,
 })
 export type PayoffPoint = typeof PayoffPoint.Type
+
+/** Carry over the horizon as a percent of capital, with the uncertainty the instrument carries at entry. */
+export const CarryBand = Schema.Struct({
+  kind: CarryKind,
+  low: Schema.Number,
+  mid: Schema.Number,
+  high: Schema.Number,
+  /** Where the band came from, for the footnote: e.g. "p10–p90 of 90-day funding windows (synthetic)". */
+  basis: Schema.String,
+})
+export type CarryBand = typeof CarryBand.Type
 
 export const PathEvent = Schema.Struct({
   day: Schema.Number,
@@ -47,6 +68,11 @@ export const InstrumentResult = Schema.Struct({
   horizonResolved: Resolved,
   /** Leverage the series were computed at: the resolved value, or the fallback when unattainable. 0 if none. */
   exposureMultiple: Schema.Number,
+  carryBand: CarryBand,
+  /** Price ratio below which the position is lost if touched at any point on the path. None for options. */
+  ruinPriceRatio: Schema.Option(Schema.Number),
+  /** Payoff under a fixed-rate carry quote (trailing average plus dealer spread). Perps only; the gap to `mid` is the price of certainty. */
+  fixedCounterfactual: Schema.Option(Schema.Array(SeriesPoint)),
   carryPctOfCapital: Schema.Array(SeriesPoint),
   payoffAtHorizon: Schema.Array(PayoffPoint),
   equityPctOfCapital: Schema.Array(SeriesPoint),

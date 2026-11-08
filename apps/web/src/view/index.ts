@@ -159,6 +159,21 @@ const chartModeTabsView = (selected: ChartMode, h: HtmlBuilder<Message>): Html =
     ),
   )
 
+const separateCarryToggleView = (separate: boolean, h: HtmlBuilder<Message>): Html =>
+  h.button(
+    [
+      h.Type('button'),
+      h.Attribute('aria-pressed', separate ? 'true' : 'false'),
+      h.Class(
+        separate
+          ? `${BUTTON} h-8 border bg-foreground px-3 text-background`
+          : `${BUTTON} h-8 border bg-background px-3 text-foreground hover:bg-accent`,
+      ),
+      h.OnClick(Message.ToggledSeparateCarry()),
+    ],
+    ['Separate carry'],
+  )
+
 const chartsSectionView = (model: Model, h: HtmlBuilder<Message>): Html =>
   h.section(
     [h.Id('compare'), h.Class('flex flex-col gap-4')],
@@ -176,7 +191,13 @@ const chartsSectionView = (model: Model, h: HtmlBuilder<Message>): Html =>
               h.p([h.Class('text-sm text-muted-foreground')], [chartModeDescription(model.chartMode)]),
             ],
           ),
-          chartModeTabsView(model.chartMode, h),
+          h.div(
+            [h.Class('flex items-center gap-2')],
+            [
+              ...(model.chartMode === 'Payoff' ? [separateCarryToggleView(model.separateCarry, h)] : []),
+              chartModeTabsView(model.chartMode, h),
+            ],
+          ),
         ],
       ),
       h.div(

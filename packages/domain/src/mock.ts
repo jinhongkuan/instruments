@@ -10,6 +10,7 @@ import {
 } from './instrument/common'
 import { DEFAULT_CONVENTIONS } from './instrument/conventions'
 import type {
+  CarryBand,
   Comparison,
   InstrumentResult,
   PathEvent,
@@ -62,6 +63,38 @@ const optionSupport = (random: () => number): InstrumentSupport => ({
 
 const TOLERANCE = DEFAULT_CONVENTIONS.option.leverageTolerance
 
+/** Synthetic annualized funding volatility used to width the floating-carry band. */
+const FUNDING_APR_SIGMA = 0.18
+const BORROW_APR_SIGMA = 0.03
+const Z_P90 = 1.2816
+const COUNTERFACTUAL_FIXED_APR = 0.116 + 0.02
+
+const flatBand = (kind: CarryBand['kind'], mid: number, basis: string): CarryBand => ({ kind, low: mid, mid, high: mid, basis })
+
+const floatingBand = (
+  kind: CarryBand['kind'],
+  mid: number,
+  aprSigma: number,
+  leverageOnCapital: number,
+  horizonDays: number,
+  basis: string,
+): CarryBand => {
+  const halfWidth = Z_P90 * aprSigma * Math.sqrt(horizonDays / DAYS_PER_YEAR) * leverageOnCapital * 100
+  return { kind, low: mid - halfWidth, mid, high: mid + halfWidth, basis }
+}
+
+const linearPayoff = (leverage: number, band: CarryBand): ReadonlyArray<PayoffPoint> =>
+  Array.map(PAYOFF_GRID, ratio => {
+    const beforeCarry = (ratio - 1) * leverage * 100
+    return {
+      terminalPriceRatio: ratio,
+      beforeCarry,
+      low: Math.max(-100, beforeCarry - band.high),
+      mid: Math.max(-100, beforeCarry - band.mid),
+      high: Math.max(-100, beforeCarry - band.low),
+    }
+  })
+
 const unavailable = (
   kind: InstrumentResult['kind'],
   label: string,
@@ -77,6 +110,9 @@ const unavailable = (
   resolved,
   horizonResolved,
   exposureMultiple: 0,
+  carryBand: flatBand(kind === 'Option' ? 'Prepaid' : 'Floating', 0, 'n/a'),
+  ruinPriceRatio: Option.none(),
+  fixedCounterfactual: Option.none(),
   carryPctOfCapital: [],
   payoffAtHorizon: [],
   equityPctOfCapital: [],
@@ -199,10 +235,21 @@ const perp = (
     })),
   )
   const totalCarryPct = lastOr(carry, 0)
-  const payoff: ReadonlyArray<PayoffPoint> = Array.map(PAYOFF_GRID, ratio => ({
-    terminalPriceRatio: ratio,
-    pnlPctOfCapital: Math.max(-100, (ratio - 1) * PERP_LEVERAGE * 100 - totalCarryPct),
+  const band = floatingBand(
+    'Floating',
+    totalCarryPct,
+    FUNDING_APR_SIGMA,
+    PERP_LEVERAGE,
+    scenario.horizonDays,
+    `p10–p90 of ${scenario.horizonDays}-day funding windows (synthetic)`,
+  )
+  const payoff = linearPayoff(PERP_LEVERAGE, band)
+  const fixedCarryPct = COUNTERFACTUAL_FIXED_APR * (scenario.horizonDays / DAYS_PER_YEAR) * PERP_LEVERAGE * 100
+  const fixedCounterfactual = Array.map(PAYOFF_GRID, ratio => ({
+    day: ratio,
+    value: Math.max(-100, (ratio - 1) * PERP_LEVERAGE * 100 - fixedCarryPct),
   }))
+  const ruinRatio = PERP_LEVERAGE > 1 ? (1 - 1 / PERP_LEVERAGE) / (1 - PERP_MAINTENANCE_MARGIN) : 0
   return {
     kind: 'Perp',
     label: 'Perpetual future',
@@ -211,6 +258,9 @@ const perp = (
     resolved,
     horizonResolved,
     exposureMultiple: PERP_LEVERAGE,
+    carryBand: band,
+    ruinPriceRatio: PERP_LEVERAGE > 1 ? Option.some(ruinRatio) : Option.none(),
+    fixedCounterfactual: Option.some(fixedCounterfactual),
     carryPctOfCapital: toSeries(carry),
     payoffAtHorizon: payoff,
     equityPctOfCapital: toSeries(equity),
@@ -263,10 +313,16 @@ const spotBorrow = (
     })),
   )
   const totalCarryPct = lastOr(carry, 0)
-  const payoff: ReadonlyArray<PayoffPoint> = Array.map(PAYOFF_GRID, ratio => ({
-    terminalPriceRatio: ratio,
-    pnlPctOfCapital: Math.max(-100, (ratio - 1) * BORROW_LEVERAGE * 100 - totalCarryPct),
-  }))
+  const band = floatingBand(
+    'Floating',
+    totalCarryPct,
+    BORROW_APR_SIGMA,
+    BORROW_LEVERAGE - 1,
+    scenario.horizonDays,
+    `p10–p90 of ${scenario.horizonDays}-day variable borrow windows (synthetic)`,
+  )
+  const payoff = linearPayoff(BORROW_LEVERAGE, band)
+  const ruinRatio = BORROW_LEVERAGE > 1 ? (BORROW_LEVERAGE - 1) / (BORROW_LEVERAGE * BORROW_LIQUIDATION_LTV) : 0
   return {
     kind: 'SpotBorrow',
     label: 'Spot + borrow',
@@ -275,6 +331,9 @@ const spotBorrow = (
     resolved,
     horizonResolved,
     exposureMultiple: BORROW_LEVERAGE,
+    carryBand: band,
+    ruinPriceRatio: BORROW_LEVERAGE > 1 ? Option.some(ruinRatio) : Option.none(),
+    fixedCounterfactual: Option.none(),
     carryPctOfCapital: toSeries(carry),
     payoffAtHorizon: payoff,
     equityPctOfCapital: toSeries(equity),
@@ -316,10 +375,27 @@ const call = (scenario: Scenario, prices: ReadonlyArray<number>, random: () => n
     terminalPrice <= 1
       ? [{ day: scenario.horizonDays, kind: 'Expiry', detail: 'Expired out of the money; premium lost' }]
       : []
-  const payoff: ReadonlyArray<PayoffPoint> = Array.map(PAYOFF_GRID, ratio => ({
-    terminalPriceRatio: ratio,
-    pnlPctOfCapital: Math.max(0, ratio - 1) * contracts * 100 - 100,
-  }))
+  const tenorDays = OPTION_EXPIRIES.find(days => days >= scenario.horizonDays) ?? OPTION_EXPIRIES[OPTION_EXPIRIES.length - 1]!
+  const rolls = Math.max(0, Math.ceil(scenario.horizonDays / tenorDays) - 1)
+  const rollSpreadPct = rolls * DEFAULT_CONVENTIONS.option.defaultRollSpreadFraction * 100
+  const rollUncertaintyPct = rolls * 12
+  const band: CarryBand = {
+    kind: 'Prepaid',
+    low: 100 + rollSpreadPct - rollUncertaintyPct,
+    mid: 100 + rollSpreadPct,
+    high: 100 + rollSpreadPct + rollUncertaintyPct,
+    basis: rolls === 0 ? 'premium paid at entry; no rolls needed' : `premium at entry plus ${rolls} roll(s) at unknown future premium (synthetic)`,
+  }
+  const payoff: ReadonlyArray<PayoffPoint> = Array.map(PAYOFF_GRID, ratio => {
+    const intrinsic = Math.max(0, ratio - 1) * contracts * 100
+    return {
+      terminalPriceRatio: ratio,
+      beforeCarry: intrinsic,
+      low: intrinsic - band.high,
+      mid: intrinsic - band.mid,
+      high: intrinsic - band.low,
+    }
+  })
   return {
     kind: 'Option',
     label: 'Call option',
@@ -328,6 +404,9 @@ const call = (scenario: Scenario, prices: ReadonlyArray<number>, random: () => n
     resolved,
     horizonResolved,
     exposureMultiple: omega,
+    carryBand: band,
+    ruinPriceRatio: Option.none(),
+    fixedCounterfactual: Option.none(),
     carryPctOfCapital: toSeries(carry),
     payoffAtHorizon: payoff,
     equityPctOfCapital: toSeries(equity),

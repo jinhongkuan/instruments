@@ -86,6 +86,9 @@ const leverageLabel = (result: InstrumentResult): string => {
 
 const hasSeries = (result: InstrumentResult): boolean => result.exposureMultiple > 0
 
+const carryKindLabel = (kind: InstrumentResult['carryBand']['kind']): string =>
+  kind === 'Floating' ? 'Floating' : kind === 'Fixed' ? 'Fixed' : kind === 'Prepaid' ? 'Prepaid' : 'Streaming'
+
 export const chartCardView = (
   result: InstrumentResult,
   mode: ChartMode,
@@ -131,13 +134,23 @@ export const chartCardView = (
         h.AriaLabel(`${result.label} ${chartModeLabel(mode)} chart`),
         h.OnMount(MountChart({ hostId: chartHostId(result.kind) })),
       ]),
+      h.p(
+        [h.Class('border-t px-4 pt-2 text-[11px] text-muted-foreground')],
+        [`${carryKindLabel(result.carryBand.kind)} carry · ${result.carryBand.basis}`],
+      ),
       h.footer(
-        [h.Class('grid grid-cols-3 gap-2 border-t px-4 py-3 text-xs')],
+        [h.Class('grid grid-cols-3 gap-2 px-4 py-3 text-xs')],
         [
           ...(!hasSeries(result)
             ? [h.div([h.Class('col-span-3 text-muted-foreground')], [result.resolved._tag === 'Unattainable' ? result.resolved.reason : 'No data'])]
             : [
-                statView('Carry', formatPercent(result.summary.totalCarryPct), h),
+                statView(
+                  result.carryBand.kind === 'Floating' ? 'Carry (p10–p90)' : 'Carry',
+                  result.carryBand.high - result.carryBand.low > 1e-9
+                    ? `${formatPercent(result.carryBand.low)} to ${formatPercent(result.carryBand.high)}`
+                    : formatPercent(result.carryBand.mid),
+                  h,
+                ),
                 statView('Terminal PnL', formatPercent(result.summary.terminalPnlPct), h),
                 statView(
                   'Worst drawdown',

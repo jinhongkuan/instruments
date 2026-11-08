@@ -43,7 +43,7 @@ const syncChart = (model: Model, hostId: string): ReadonlyArray<Command.Command<
   pipe(
     kindFromChartHostId(hostId),
     Option.map(kind =>
-      SyncChart({ hostId, kind, mode: model.chartMode, comparison: model.comparison }),
+      SyncChart({ hostId, kind, mode: model.chartMode, comparison: model.comparison, separateCarry: model.separateCarry }),
     ),
     Array.fromOption,
   )
@@ -86,6 +86,8 @@ export const update = (model: Model, message: Message) =>
     },
 
     SelectedChartMode: ({ mode }) => withSync(modifyFields(model, { chartMode: () => mode })),
+
+    ToggledSeparateCarry: () => withSync(modifyFields(model, { separateCarry: separate => !separate })),
 
     SucceededMountChart: ({ hostId }) => {
       const nextModel = modifyFields(model, {

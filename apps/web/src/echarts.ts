@@ -3,6 +3,7 @@ import {
   AriaComponent,
   GridComponent,
   LegendComponent,
+  MarkAreaComponent,
   MarkLineComponent,
   TooltipComponent,
 } from 'echarts/components'
@@ -22,6 +23,7 @@ export const registerEcharts = () => {
     GridComponent,
     LegendComponent,
     LineChart,
+    MarkAreaComponent,
     MarkLineComponent,
     TooltipComponent,
   ])
@@ -82,38 +84,128 @@ const carryOption = (result: InstrumentResult): EChartsOption => ({
   ],
 })
 
-const payoffOption = (result: InstrumentResult): EChartsOption => ({
-  ...baseOption(),
-  tooltip: { trigger: 'axis', confine: true, valueFormatter: value => `${value}%` },
-  xAxis: {
-    type: 'category',
-    boundaryGap: false,
-    name: 'terminal / entry',
-    nameLocation: 'middle',
-    nameGap: 22,
-    nameTextStyle: { color: '#71717a', fontSize: 11 },
-    data: Array.map(result.payoffAtHorizon, point => `${round(point.terminalPriceRatio)}x`),
-    axisLabel: { color: '#71717a', interval: 7 },
-  },
-  yAxis: percentAxis('PnL % of capital'),
-  series: [
-    {
-      name: 'net payoff',
-      type: 'line',
-      showSymbol: false,
-      lineStyle: { width: 2.5, color: instrumentColor(result.kind) },
-      itemStyle: { color: instrumentColor(result.kind) },
-      data: Array.map(result.payoffAtHorizon, point => round(point.pnlPctOfCapital)),
-      markLine: {
-        symbol: 'none',
-        silent: true,
-        lineStyle: { color: PRICE_COLOR, type: 'dashed' },
-        label: { color: '#71717a', fontSize: 10 },
-        data: [{ yAxis: 0, name: 'breakeven' }, { xAxis: '1x', name: 'entry' }],
-      },
+const ratioLabel = (ratio: number): string => `${round(ratio)}x`
+
+const nearestGridLabel = (result: InstrumentResult, ratio: number): string =>
+  pipe(
+    result.payoffAtHorizon,
+    Array.map(point => point.terminalPriceRatio),
+    ratios => ratios.reduce((best, r) => (Math.abs(r - ratio) < Math.abs(best - ratio) ? r : best), ratios[0] ?? 1),
+    ratioLabel,
+  )
+
+const payoffOption = (result: InstrumentResult, separateCarry: boolean): EChartsOption => {
+  const color = instrumentColor(result.kind)
+  const labels = Array.map(result.payoffAtHorizon, point => ratioLabel(point.terminalPriceRatio))
+  const hasBand = result.carryBand.high - result.carryBand.low > 1e-9
+  const firstLabel = labels[0] ?? '0.5x'
+  type RuinMarks = Readonly<{
+    lines: ReadonlyArray<{ xAxis: string; name: string; lineStyle: { color: string; width: number }; label: { formatter: string; color: string; fontSize: number; position: 'insideEndTop' } }>
+    areas: ReadonlyArray<[{ xAxis: string }, { xAxis: string }]>
+  }>
+  const ruinMarks: RuinMarks = Option.match(result.ruinPriceRatio, {
+    onNone: () => ({ lines: [], areas: [] }),
+    onSome: ratio => {
+      const at = nearestGridLabel(result, ratio)
+      return {
+        lines: [{ xAxis: at, name: 'liquidated if touched', lineStyle: { color: '#ef4444', width: 1.5 }, label: { formatter: 'liquidation', color: '#ef4444', fontSize: 10, position: 'insideEndTop' } }],
+        areas: [[{ xAxis: firstLabel }, { xAxis: at }]],
+      }
     },
-  ],
-})
+  })
+  const bandSeries = hasBand
+    ? [
+        {
+          name: 'carry band (low)',
+          type: 'line' as const,
+          stack: 'band',
+          showSymbol: false,
+          silent: true,
+          lineStyle: { opacity: 0 },
+          itemStyle: { color },
+          tooltip: { show: false },
+          data: Array.map(result.payoffAtHorizon, point => round(point.low)),
+        },
+        {
+          name: 'carry band',
+          type: 'line' as const,
+          stack: 'band',
+          showSymbol: false,
+          silent: true,
+          lineStyle: { opacity: 0 },
+          itemStyle: { color },
+          areaStyle: { color, opacity: 0.16 },
+          data: Array.map(result.payoffAtHorizon, point => round(point.high - point.low)),
+        },
+      ]
+    : []
+  const counterfactual = Option.match(result.fixedCounterfactual, {
+    onNone: () => [],
+    onSome: series => [
+      {
+        name: 'fixed-rate quote',
+        type: 'line' as const,
+        showSymbol: false,
+        lineStyle: { width: 1.5, color: '#52525b', type: 'dashed' as const },
+        itemStyle: { color: '#52525b' },
+        data: Array.map(series, point => round(point.value)),
+      },
+    ],
+  })
+  const beforeCarry = separateCarry
+    ? [
+        {
+          name: 'before carry',
+          type: 'line' as const,
+          showSymbol: false,
+          lineStyle: { width: 1.5, color, type: 'dotted' as const },
+          itemStyle: { color },
+          data: Array.map(result.payoffAtHorizon, point => round(point.beforeCarry)),
+        },
+      ]
+    : []
+  return {
+    ...baseOption(),
+    tooltip: { trigger: 'axis', confine: true, valueFormatter: value => `${value}%` },
+    legend: { ...baseOption().legend, data: ['net payoff', ...(hasBand ? ['carry band'] : []), ...(counterfactual.length > 0 ? ['fixed-rate quote'] : []), ...(separateCarry ? ['before carry'] : [])] },
+    xAxis: {
+      type: 'category',
+      boundaryGap: false,
+      name: 'price at end / price at entry',
+      nameLocation: 'middle',
+      nameGap: 22,
+      nameTextStyle: { color: '#71717a', fontSize: 11 },
+      data: labels,
+      axisLabel: { color: '#71717a', interval: 7 },
+    },
+    yAxis: percentAxis('PnL % of capital'),
+    series: [
+      ...bandSeries,
+      ...counterfactual,
+      ...beforeCarry,
+      {
+        name: 'net payoff',
+        type: 'line',
+        showSymbol: false,
+        lineStyle: { width: 2.5, color },
+        itemStyle: { color },
+        data: Array.map(result.payoffAtHorizon, point => round(point.mid)),
+        markLine: {
+          symbol: 'none',
+          silent: true,
+          lineStyle: { color: PRICE_COLOR, type: 'dashed' },
+          label: { color: '#71717a', fontSize: 10 },
+          data: [{ yAxis: 0, name: 'breakeven' }, { xAxis: '1x', name: 'entry' }, ...ruinMarks.lines] as never,
+        },
+        markArea: {
+          silent: true,
+          itemStyle: { color: '#ef4444', opacity: 0.06 },
+          data: [...ruinMarks.areas],
+        },
+      },
+    ],
+  }
+}
 
 const pathOption = (result: InstrumentResult, comparison: Comparison): EChartsOption => {
   const days = Array.map(result.equityPctOfCapital, point => point.day)
@@ -169,6 +261,7 @@ export type ChartOptionArgs = Readonly<{
   kind: InstrumentKind
   mode: ChartMode
   comparison: Comparison
+  separateCarry: boolean
 }>
 
 const unavailableOption = (reason: string): EChartsOption => ({
@@ -192,7 +285,7 @@ export const makeChartOption = (args: ChartOptionArgs): Option.Option<EChartsOpt
         ? unavailableOption(result.resolved._tag === 'Unattainable' ? result.resolved.reason : 'No data')
         : Match.value(args.mode).pipe(
         Match.when('Carry', () => carryOption(result)),
-        Match.when('Payoff', () => payoffOption(result)),
+        Match.when('Payoff', () => payoffOption(result, args.separateCarry)),
         Match.when('Path', () => pathOption(result, args.comparison)),
         Match.exhaustive,
         ),

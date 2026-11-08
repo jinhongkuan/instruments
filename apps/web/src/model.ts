@@ -9,6 +9,8 @@ export const Model = Schema.Struct({
   scenario: Scenario,
   comparison: Comparison,
   chartMode: ChartMode,
+  /** Payoff chart: draw the pure price leg as a separate line so carry is visible as the gap. */
+  separateCarry: Schema.Boolean,
   /** Raw slider positions in [0, 1]. Kept separate from the resolved scenario so the thumb never jumps under the pointer. */
   leveragePosition: Schema.Number,
   horizonPosition: Schema.Number,
