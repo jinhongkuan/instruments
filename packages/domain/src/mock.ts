@@ -1,6 +1,13 @@
 import { Array, Option, pipe } from 'effect'
 
-import { type LeverageSupport, type Resolved, resolveLeverage } from './instrument/common'
+import {
+  type AxisSupport,
+  type InstrumentSupport,
+  type Resolved,
+  resolveHorizon,
+  resolveLeverage,
+  resolvedValue,
+} from './instrument/common'
 import { DEFAULT_CONVENTIONS } from './instrument/conventions'
 import type {
   Comparison,
@@ -24,33 +31,51 @@ const BORROW_LIQUIDATION_LTV = 0.825
 const CALL_IMPLIED_VOL = 0.65
 const CALL_DELTA = 0.5
 
-const perpSupport: LeverageSupport = { _tag: 'Continuous', min: 1, max: PERP_MAX_LEVERAGE }
-const borrowSupport: LeverageSupport = { _tag: 'Continuous', min: 1, max: 1 + BORROW_MAX_LTV }
+const anyHorizon: AxisSupport = { _tag: 'Continuous', min: 1, max: 3650, pins: [] }
+const perpSupport: InstrumentSupport = {
+  leverage: { _tag: 'Continuous', min: 1, max: PERP_MAX_LEVERAGE, pins: [] },
+  horizonDays: anyHorizon,
+}
+const borrowSupport: InstrumentSupport = {
+  leverage: { _tag: 'Continuous', min: 1, max: 1 + BORROW_MAX_LTV, pins: [] },
+  horizonDays: anyHorizon,
+}
 
-/** Synthetic chain: a handful of calls whose effective leverage spreads across strikes. */
-const optionSupport = (random: () => number): LeverageSupport => ({
-  _tag: 'Discrete',
-  points: [0.9, 1.0, 1.1, 1.25, 1.5].map((moneyness, index) => {
-    const omega = (2.6 + index * 2.1) * (0.9 + random() * 0.2)
-    return { leverage: Math.round(omega * 100) / 100, label: `${Math.round(moneyness * 100)}% strike, 90d` }
-  }),
+const OPTION_EXPIRIES = [7, 14, 30, 60, 90, 180, 365]
+
+/** Synthetic chain: a handful of calls whose effective leverage spreads across strikes, plus listed expiries. */
+const optionSupport = (random: () => number): InstrumentSupport => ({
+  leverage: {
+    _tag: 'Discrete',
+    points: [0.9, 1.0, 1.1, 1.25, 1.5].map((moneyness, index) => {
+      const omega = (2.6 + index * 2.1) * (0.9 + random() * 0.2)
+      return { value: Math.round(omega * 100) / 100, label: `${Math.round(moneyness * 100)}% strike` }
+    }),
+  },
+  horizonDays: {
+    _tag: 'Continuous',
+    min: 7,
+    max: 3650,
+    pins: OPTION_EXPIRIES.map(days => ({ value: days, label: `expiry in ${days}d` })),
+  },
 })
 
-const achieved = (resolved: Resolved): number =>
-  resolved._tag === 'Unattainable' ? 0 : resolved.leverage
+const TOLERANCE = DEFAULT_CONVENTIONS.option.leverageTolerance
 
 const unavailable = (
   kind: InstrumentResult['kind'],
   label: string,
   venue: string,
-  support: LeverageSupport,
+  support: InstrumentSupport,
   resolved: Resolved,
+  horizonResolved: Resolved,
 ): InstrumentResult => ({
   kind,
   label,
   venue,
   support,
   resolved,
+  horizonResolved,
   exposureMultiple: 0,
   carryPctOfCapital: [],
   payoffAtHorizon: [],
@@ -141,11 +166,13 @@ const perp = (
   prices: ReadonlyArray<number>,
   random: () => number,
 ): InstrumentResult => {
-  const resolved = resolveLeverage(perpSupport, scenario.leverage, DEFAULT_CONVENTIONS.option.leverageTolerance)
-  if (resolved._tag === 'Unattainable') {
-    return unavailable('Perp', 'Perpetual future', 'Hyperliquid', perpSupport, resolved)
+  const resolved = resolveLeverage(perpSupport.leverage, scenario.leverage, TOLERANCE)
+  const horizonResolved = resolveHorizon(perpSupport.horizonDays, scenario.horizonDays, TOLERANCE)
+  const maybeLeverage = resolvedValue(resolved)
+  if (Option.isNone(maybeLeverage)) {
+    return unavailable('Perp', 'Perpetual future', 'Hyperliquid', perpSupport, resolved, horizonResolved)
   }
-  const PERP_LEVERAGE = resolved.leverage
+  const PERP_LEVERAGE = maybeLeverage.value
   const funding = hourlyFundingPath(scenario.horizonDays, random)
   const dailyCarryPct = Array.zipWith(
     funding,
@@ -182,6 +209,7 @@ const perp = (
     venue: 'Hyperliquid',
     support: perpSupport,
     resolved,
+    horizonResolved,
     exposureMultiple: PERP_LEVERAGE,
     carryPctOfCapital: toSeries(carry),
     payoffAtHorizon: payoff,
@@ -201,11 +229,13 @@ const spotBorrow = (
   prices: ReadonlyArray<number>,
   random: () => number,
 ): InstrumentResult => {
-  const resolved = resolveLeverage(borrowSupport, scenario.leverage, DEFAULT_CONVENTIONS.option.leverageTolerance)
-  if (resolved._tag === 'Unattainable') {
-    return unavailable('SpotBorrow', 'Spot + borrow', 'Aave', borrowSupport, resolved)
+  const resolved = resolveLeverage(borrowSupport.leverage, scenario.leverage, TOLERANCE)
+  const horizonResolved = resolveHorizon(borrowSupport.horizonDays, scenario.horizonDays, TOLERANCE)
+  const maybeLeverage = resolvedValue(resolved)
+  if (Option.isNone(maybeLeverage)) {
+    return unavailable('SpotBorrow', 'Spot + borrow', 'Aave', borrowSupport, resolved, horizonResolved)
   }
-  const BORROW_LEVERAGE = resolved.leverage
+  const BORROW_LEVERAGE = maybeLeverage.value
   const baseApr = 0.06 + random() * 0.04
   const borrowedMultiple = BORROW_LEVERAGE - 1
   const dailyCarryPct = Array.makeBy(
@@ -243,6 +273,7 @@ const spotBorrow = (
     venue: 'Aave',
     support: borrowSupport,
     resolved,
+    horizonResolved,
     exposureMultiple: BORROW_LEVERAGE,
     carryPctOfCapital: toSeries(carry),
     payoffAtHorizon: payoff,
@@ -259,12 +290,15 @@ const spotBorrow = (
 
 const call = (scenario: Scenario, prices: ReadonlyArray<number>, random: () => number): InstrumentResult => {
   const support = optionSupport(random)
-  const resolved = resolveLeverage(support, scenario.leverage, DEFAULT_CONVENTIONS.option.leverageTolerance)
-  if (resolved._tag === 'Unattainable') {
-    return unavailable('Option', 'Call option', 'Deribit', support, resolved)
+  const resolved = resolveLeverage(support.leverage, scenario.leverage, TOLERANCE)
+  const horizonResolved = resolveHorizon(support.horizonDays, scenario.horizonDays, TOLERANCE)
+  const maybeLeverage = resolvedValue(resolved)
+  if (Option.isNone(maybeLeverage)) {
+    return unavailable('Option', 'Call option', 'Deribit', support, resolved, horizonResolved)
   }
+  const omega = maybeLeverage.value
   const years = scenario.horizonDays / DAYS_PER_YEAR
-  const premiumPerUnit = CALL_DELTA / resolved.leverage
+  const premiumPerUnit = CALL_DELTA / omega
   const contracts = 1 / premiumPerUnit
   const timeValueAt = (dayIndex: number, price: number): number => {
     const remaining = Math.max(0, years - (dayIndex + 1) / DAYS_PER_YEAR)
@@ -292,7 +326,8 @@ const call = (scenario: Scenario, prices: ReadonlyArray<number>, random: () => n
     venue: 'Deribit',
     support,
     resolved,
-    exposureMultiple: resolved.leverage,
+    horizonResolved,
+    exposureMultiple: omega,
     carryPctOfCapital: toSeries(carry),
     payoffAtHorizon: payoff,
     equityPctOfCapital: toSeries(equity),

@@ -185,6 +185,13 @@ export const borrowModel: InstrumentModel<BorrowState, BorrowQuoteDetail> = {
 
   support: (state, conventions) => {
     const loops = state.collateral.loopingAllowed ? conventions.borrow.maxLoops : 1
-    return { _tag: 'Continuous', min: 1, max: maxLeverage(state.collateral.maxLtv, loops) }
+    return {
+      leverage: { _tag: 'Continuous', min: 1, max: maxLeverage(state.collateral.maxLtv, loops), pins: [] },
+      // Variable-rate markets run indefinitely; a fixed-term market is one maturity (roll beyond it is v2).
+      horizonDays: Option.match(state.rate.fixedTermDays, {
+        onNone: () => ({ _tag: 'Continuous' as const, min: 1, max: 3650, pins: [] }),
+        onSome: term => ({ _tag: 'Discrete' as const, points: [{ value: term, label: `${term}d fixed term` }] }),
+      }),
+    }
   },
 }

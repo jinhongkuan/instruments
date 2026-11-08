@@ -10,40 +10,35 @@ export const DEFAULT_SCENARIO: Scenario = {
   leverage: 3,
 }
 
-export const LEVERAGE_MIN = 1
-export const LEVERAGE_MAX = 50
+/** A log-scale slider axis: position in [0, 1] <-> value in [min, max]. */
+export type LogAxis = Readonly<{ min: number; max: number }>
 
-/** Slider position in [0, 1] <-> leverage on a log scale. */
-export const leverageFromSlider = (position: number): number =>
-  Math.exp(Math.log(LEVERAGE_MIN) + position * (Math.log(LEVERAGE_MAX) - Math.log(LEVERAGE_MIN)))
+export const LEVERAGE_AXIS: LogAxis = { min: 1, max: 50 }
+export const HORIZON_AXIS: LogAxis = { min: 7, max: 730 }
 
-export const sliderFromLeverage = (leverage: number): number =>
-  (Math.log(leverage) - Math.log(LEVERAGE_MIN)) / (Math.log(LEVERAGE_MAX) - Math.log(LEVERAGE_MIN))
+export const valueFromSlider = (axis: LogAxis, position: number): number =>
+  Math.exp(Math.log(axis.min) + Math.min(1, Math.max(0, position)) * (Math.log(axis.max) - Math.log(axis.min)))
 
-/** Soft snap: if a discrete pin sits just below the requested value, land on it. */
+export const sliderFromValue = (axis: LogAxis, value: number): number =>
+  (Math.log(Math.min(axis.max, Math.max(axis.min, value))) - Math.log(axis.min)) /
+  (Math.log(axis.max) - Math.log(axis.min))
+
+/** Soft snap down: if a pin sits just below the requested value, land on it. */
 export const softSnapDown = (requested: number, pins: ReadonlyArray<number>, relativeWindow: number): number =>
   pins
     .filter(pin => pin <= requested && (requested - pin) / requested <= relativeWindow)
     .sort((a, b) => b - a)[0] ?? requested
 
-const parsePositive = (input: string, fallback: number): number => {
-  const parsed = Number(input.replace(/[^0-9.]/g, ''))
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback
-}
+/** Soft snap to the nearest pin in either direction within the window. */
+export const softSnapNearest = (requested: number, pins: ReadonlyArray<number>, relativeWindow: number): number =>
+  pins
+    .filter(pin => Math.abs(pin - requested) / requested <= relativeWindow)
+    .sort((a, b) => Math.abs(a - requested) - Math.abs(b - requested))[0] ?? requested
 
-export const scenarioFromInputs = (inputs: {
-  tickerInput: string
-  capitalInput: string
-  horizonInput: string
-  entryDate: string
-  leverage: number
-}): Scenario => ({
-  ticker: inputs.tickerInput.trim().toUpperCase() || DEFAULT_SCENARIO.ticker,
-  capitalUsd: parsePositive(inputs.capitalInput, DEFAULT_SCENARIO.capitalUsd),
-  horizonDays: Math.min(730, Math.round(parsePositive(inputs.horizonInput, DEFAULT_SCENARIO.horizonDays))),
-  entryDate: inputs.entryDate,
-  leverage: inputs.leverage,
-})
+export const KNOWN_TICKERS: ReadonlyArray<string> = ['BTC', 'ETH', 'SOL', 'HYPE', 'XRP', 'DOGE', 'BNB', 'AVAX', 'LINK', 'ARB']
+
+export const normalizeTicker = (input: string): string =>
+  input.trim().toUpperCase().replace(/[^A-Z0-9:-]/g, '')
 
 export const chartHostId = (kind: InstrumentKind): string => `chart-${kind}`
 

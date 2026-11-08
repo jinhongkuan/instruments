@@ -106,11 +106,13 @@ describe("optionModel.quote", () => {
     expect(isUnavailable(q) && q._tag === "LeverageNotAttainable").toBe(true);
   });
 
-  it("support lists one pin per eligible call, sorted by leverage", () => {
+  it("support lists one leverage pin per eligible call and expiries as horizon pins", () => {
     const s = optionModel.support(optionState(chain), C);
-    if (s._tag !== "Discrete") throw new Error(s._tag);
-    expect(s.points.map(p => Number(p.leverage.toFixed(2)))).toEqual([5.36, 6.88, 10]);
-    expect(s.points[1]!.label).toBe("100,000 call, 2026-03-27");
+    if (s.leverage._tag !== "Discrete") throw new Error(s.leverage._tag);
+    expect(s.leverage.points.map(p => Number(p.value.toFixed(2)))).toEqual([5.36, 6.88, 10]);
+    expect(s.leverage.points[1]!.label).toBe("100,000 call, 2026-03-27");
+    if (s.horizonDays._tag !== "Continuous") throw new Error(s.horizonDays._tag);
+    expect(s.horizonDays.pins.map(p => p.value)).toEqual([85]);
   });
 
   it("a 7x request lands on the ATM call: Prepaid, Convex, Expiry, no rolls for an 85-day tenor", () => {

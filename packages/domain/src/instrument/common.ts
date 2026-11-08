@@ -155,84 +155,166 @@ export const Unavailable = Schema.Union([
 export type Unavailable = typeof Unavailable.Type;
 
 /**
- * Which leverages an instrument can actually deliver for an asset right now.
- * Perps and borrow are continuous up to a cap; options are one point per
- * listed contract. The dashboard slider is drawn from this, and `quote` must
- * agree with it.
+ * What values of an axis (leverage, horizon) an instrument can deliver for an
+ * asset right now. Perps and borrow are continuous up to a cap; option
+ * leverage is one point per listed contract; option horizon is continuous
+ * (via rolls) with expiries as informational pins. The dashboard sliders are
+ * drawn from this, and `quote` must agree with it.
  */
-export const LeveragePoint = Schema.Struct({
-  leverage: Leverage,
-  /** Human label for the pin, e.g. "100k call, 27 Mar". */
+export const AxisPoint = Schema.Struct({
+  value: Schema.Number,
+  /** Human label for the pin, e.g. "100k call, 27 Mar" or "expiry 27 Mar". */
   label: Schema.String,
 });
-export type LeveragePoint = typeof LeveragePoint.Type;
+export type AxisPoint = typeof AxisPoint.Type;
 
-export const LeverageSupport = Schema.Union([
-  Schema.TaggedStruct("Continuous", { min: Leverage, max: Leverage }),
-  Schema.TaggedStruct("Discrete", { points: Schema.Array(LeveragePoint) }),
+export const AxisSupport = Schema.Union([
+  Schema.TaggedStruct("Continuous", {
+    min: Schema.Number,
+    max: Schema.Number,
+    /** Informational markers inside the range (expiries, tier boundaries). Soft-snap targets, never constraints. */
+    pins: Schema.Array(AxisPoint),
+  }),
+  Schema.TaggedStruct("Discrete", { points: Schema.Array(AxisPoint) }),
   Schema.TaggedStruct("None", { reason: Schema.String }),
 ]);
-export type LeverageSupport = typeof LeverageSupport.Type;
+export type AxisSupport = typeof AxisSupport.Type;
+
+/** Both axes an instrument exposes to the lens. */
+export const InstrumentSupport = Schema.Struct({
+  leverage: AxisSupport,
+  horizonDays: AxisSupport,
+});
+export type InstrumentSupport = typeof InstrumentSupport.Type;
+
+/**
+ * Which way a discrete axis may snap. Leverage snaps Down (more exposure is
+ * more risk than asked for). Horizon snaps Up (a shorter tenor forces an extra
+ * roll). Nearest is for axes where neither direction is riskier.
+ */
+export const SnapPolicy = Schema.Literals(["Down", "Up", "Nearest"]);
+export type SnapPolicy = typeof SnapPolicy.Type;
 
 export const Resolved = Schema.Union([
-  Schema.TaggedStruct("Exact", { leverage: Leverage }),
-  Schema.TaggedStruct("SnappedDown", { requested: Leverage, leverage: Leverage, label: Schema.String }),
-  Schema.TaggedStruct("Unattainable", { requested: Leverage, nearest: Schema.Option(Leverage), reason: Schema.String }),
+  Schema.TaggedStruct("Exact", { value: Schema.Number }),
+  Schema.TaggedStruct("Snapped", {
+    requested: Schema.Number,
+    value: Schema.Number,
+    label: Schema.String,
+    direction: Schema.Literals(["Down", "Up"]),
+  }),
+  Schema.TaggedStruct("Unattainable", {
+    requested: Schema.Number,
+    /** Highest supported value strictly below the request, if any. The UI renders this, greyed, as the fallback. */
+    fallback: Schema.Option(Schema.Number),
+    /** Nearest supported value in either direction, for the message. */
+    nearest: Schema.Option(Schema.Number),
+    reason: Schema.String,
+  }),
 ]);
 export type Resolved = typeof Resolved.Type;
 
+const fmt = (value: number): string => (value < 10 ? value.toFixed(2) : value.toFixed(0));
+
 /**
- * Map a requested leverage onto what the instrument supports. Continuous
- * support is exact up to the cap. Discrete support snaps DOWN to the highest
- * point at or below the request, and only if it is within `tolerance`
- * (relative). Snapping up would hand the user more risk than they asked for.
+ * Map a requested axis value onto what the instrument supports. Continuous
+ * support is exact inside the range. Discrete support snaps per `policy`,
+ * and only within `tolerance` (relative). Unattainable results still carry
+ * the highest supported value below the request so the UI can show it.
  */
-export const resolveLeverage = (
-  support: LeverageSupport,
+export const resolveAxis = (
+  support: AxisSupport,
   requested: number,
   tolerance: number,
+  policy: SnapPolicy,
 ): Resolved => {
   switch (support._tag) {
     case "None":
-      return { _tag: "Unattainable", requested, nearest: Option.none(), reason: support.reason };
+      return { _tag: "Unattainable", requested, fallback: Option.none(), nearest: Option.none(), reason: support.reason };
     case "Continuous":
       if (requested < support.min) {
-        return { _tag: "Unattainable", requested, nearest: Option.some(support.min), reason: `Minimum is ${support.min}x` };
-      }
-      if (requested > support.max) {
-        return { _tag: "Unattainable", requested, nearest: Option.some(support.max), reason: `Maximum is ${support.max.toFixed(2)}x` };
-      }
-      return { _tag: "Exact", leverage: requested };
-    case "Discrete": {
-      const below = support.points
-        .filter(p => p.leverage <= requested * (1 + 1e-9))
-        .sort((a, b) => b.leverage - a.leverage)[0];
-      const nearestAny = [...support.points].sort(
-        (a, b) => Math.abs(a.leverage - requested) - Math.abs(b.leverage - requested),
-      )[0];
-      if (below === undefined) {
         return {
           _tag: "Unattainable",
           requested,
-          nearest: Option.fromNullishOr(nearestAny?.leverage),
-          reason: nearestAny ? `Lowest listed contract delivers ${nearestAny.leverage.toFixed(2)}x` : "No contracts listed",
+          fallback: Option.none(),
+          nearest: Option.some(support.min),
+          reason: `Minimum is ${fmt(support.min)}`,
         };
       }
-      const error = (requested - below.leverage) / requested;
+      if (requested > support.max) {
+        return {
+          _tag: "Unattainable",
+          requested,
+          fallback: Option.some(support.max),
+          nearest: Option.some(support.max),
+          reason: `Maximum is ${fmt(support.max)}`,
+        };
+      }
+      return { _tag: "Exact", value: requested };
+    case "Discrete": {
+      const sorted = [...support.points].sort((a, b) => a.value - b.value);
+      const exact = sorted.find(p => Math.abs(p.value - requested) <= 1e-9 * Math.max(1, requested));
+      if (exact) {
+        return { _tag: "Exact", value: exact.value };
+      }
+      const below = [...sorted].reverse().find(p => p.value < requested);
+      const above = sorted.find(p => p.value > requested);
+      const nearestAny = [...sorted].sort(
+        (a, b) => Math.abs(a.value - requested) - Math.abs(b.value - requested),
+      )[0];
+      const candidate =
+        policy === "Down" ? below : policy === "Up" ? above : nearestAny;
+      const fallback = Option.fromNullishOr(below?.value);
+      const nearest = Option.fromNullishOr(nearestAny?.value);
+      if (candidate === undefined) {
+        return {
+          _tag: "Unattainable",
+          requested,
+          fallback,
+          nearest,
+          reason:
+            policy === "Down"
+              ? nearestAny
+                ? `Lowest listed is ${fmt(nearestAny.value)}`
+                : "Nothing listed"
+              : policy === "Up"
+                ? nearestAny
+                  ? `Longest listed is ${fmt(nearestAny.value)}`
+                  : "Nothing listed"
+                : "Nothing listed",
+        };
+      }
+      const error = Math.abs(requested - candidate.value) / requested;
       if (error > tolerance) {
         return {
           _tag: "Unattainable",
           requested,
-          nearest: Option.some(below.leverage),
-          reason: `Nearest contract at or below delivers ${below.leverage.toFixed(2)}x (${(error * 100).toFixed(0)}% short)`,
+          fallback,
+          nearest,
+          reason: `Nearest ${policy === "Down" ? "at or below" : policy === "Up" ? "at or above" : "listed"} is ${fmt(candidate.value)} (${(error * 100).toFixed(0)}% off)`,
         };
       }
-      return Math.abs(error) < 1e-9
-        ? { _tag: "Exact", leverage: below.leverage }
-        : { _tag: "SnappedDown", requested, leverage: below.leverage, label: below.label };
+      return {
+        _tag: "Snapped",
+        requested,
+        value: candidate.value,
+        label: candidate.label,
+        direction: candidate.value < requested ? "Down" : "Up",
+      };
     }
   }
 };
+
+/** Leverage always snaps down. */
+export const resolveLeverage = (support: AxisSupport, requested: number, tolerance: number): Resolved =>
+  resolveAxis(support, requested, tolerance, "Down");
+
+/** Horizon snaps up when discrete (fixed-term markets); continuous support is exact. */
+export const resolveHorizon = (support: AxisSupport, requestedDays: number, tolerance: number): Resolved =>
+  resolveAxis(support, requestedDays, tolerance, "Up");
+
+export const resolvedValue = (resolved: Resolved): Option.Option<number> =>
+  resolved._tag === "Unattainable" ? resolved.fallback : Option.some(resolved.value);
 
 export const isUnavailable = (
   value: LeveragedExposureQuote | Unavailable,
@@ -280,8 +362,8 @@ export interface InstrumentModel<State, Detail> {
   ) => number;
   /** Recover the typed detail from a quote's opaque `detail` field. */
   readonly decodeDetail: (quote: LeveragedExposureQuote) => Detail;
-  /** Which leverages this instrument can deliver from the given state. `quote` must agree with it. */
-  readonly support: (state: State, conventions: Conventions) => LeverageSupport;
+  /** Which leverages and horizons this instrument can deliver from the given state. `quote` must agree with it. */
+  readonly support: (state: State, conventions: Conventions) => InstrumentSupport;
 }
 
 export const DAYS_PER_YEAR = 365;

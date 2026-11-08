@@ -188,8 +188,8 @@ export const makeChartOption = (args: ChartOptionArgs): Option.Option<EChartsOpt
   pipe(
     Array.findFirst(args.comparison.instruments, result => result.kind === args.kind),
     Option.map(result =>
-      result.resolved._tag === 'Unattainable'
-        ? unavailableOption(result.resolved.reason)
+      result.exposureMultiple === 0
+        ? unavailableOption(result.resolved._tag === 'Unattainable' ? result.resolved.reason : 'No data')
         : Match.value(args.mode).pipe(
         Match.when('Carry', () => carryOption(result)),
         Match.when('Payoff', () => payoffOption(result)),

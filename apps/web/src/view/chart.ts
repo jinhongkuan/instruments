@@ -1,5 +1,5 @@
 import * as echarts from 'echarts/core'
-import { Effect, Queue, Schema, Stream } from 'effect'
+import { Effect, Option, Queue, Schema, Stream } from 'effect'
 import { Mount } from 'foldkit'
 import type { Html } from 'foldkit/html'
 import { HtmlBuilder } from 'foldkit/html'
@@ -70,12 +70,21 @@ export const MountChart = Mount.defineStream('MountChart', {
 export const kindClass = (kind: InstrumentResult['kind']): string =>
   kind === 'Perp' ? 'bg-chart-perp' : kind === 'SpotBorrow' ? 'bg-chart-borrow' : 'bg-chart-option'
 
-const leverageLabel = (result: InstrumentResult): string =>
-  result.resolved._tag === 'Exact'
-    ? `${result.resolved.leverage.toFixed(2)}x`
-    : result.resolved._tag === 'SnappedDown'
-      ? `${result.resolved.leverage.toFixed(2)}x (snapped down from ${result.resolved.requested.toFixed(2)}x)`
-      : `not available at ${result.resolved.requested.toFixed(2)}x`
+const leverageLabel = (result: InstrumentResult): string => {
+  const r = result.resolved
+  if (r._tag === 'Exact') {
+    return `${r.value.toFixed(2)}x`
+  }
+  if (r._tag === 'Snapped') {
+    return `${r.value.toFixed(2)}x (snapped ${r.direction === 'Down' ? 'down' : 'up'} from ${r.requested.toFixed(2)}x, ${r.label})`
+  }
+  return Option.match(r.fallback, {
+    onNone: () => `not available at ${r.requested.toFixed(2)}x`,
+    onSome: fallback => `showing ${fallback.toFixed(2)}x, the highest available below ${r.requested.toFixed(2)}x`,
+  })
+}
+
+const hasSeries = (result: InstrumentResult): boolean => result.exposureMultiple > 0
 
 export const chartCardView = (
   result: InstrumentResult,
@@ -125,8 +134,8 @@ export const chartCardView = (
       h.footer(
         [h.Class('grid grid-cols-3 gap-2 border-t px-4 py-3 text-xs')],
         [
-          ...(result.resolved._tag === 'Unattainable'
-            ? [h.div([h.Class('col-span-3 text-muted-foreground')], [result.resolved.reason])]
+          ...(!hasSeries(result)
+            ? [h.div([h.Class('col-span-3 text-muted-foreground')], [result.resolved._tag === 'Unattainable' ? result.resolved.reason : 'No data'])]
             : [
                 statView('Carry', formatPercent(result.summary.totalCarryPct), h),
                 statView('Terminal PnL', formatPercent(result.summary.terminalPnlPct), h),

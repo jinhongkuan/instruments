@@ -252,13 +252,24 @@ export const optionModel: InstrumentModel<OptionState, OptionQuoteDetail> = {
 
   support: (state, conventions) => {
     if (state.style === 'Perpetual') {
-      return { _tag: 'None', reason: 'Perpetual options unsupported in v1' }
+      const none = { _tag: 'None' as const, reason: 'Perpetual options unsupported in v1' }
+      return { leverage: none, horizonDays: none }
     }
-    const points = candidates(state.chain, state.observedAt, 1, conventions.option.minDaysToExpiry)
-      .map(c => ({ leverage: c.omega, label: contractLabel(c.quote) }))
-      .sort((a, b) => a.leverage - b.leverage)
-    return points.length === 0
-      ? { _tag: 'None', reason: 'No listed calls for this asset' }
-      : { _tag: 'Discrete', points }
+    const eligible = candidates(state.chain, state.observedAt, 1, conventions.option.minDaysToExpiry)
+    if (eligible.length === 0) {
+      const none = { _tag: 'None' as const, reason: 'No listed calls for this asset' }
+      return { leverage: none, horizonDays: none }
+    }
+    const leveragePoints = eligible
+      .map(c => ({ value: c.omega, label: contractLabel(c.quote) }))
+      .sort((a, b) => a.value - b.value)
+    const expiries = [...new Set(eligible.map(c => Math.round(c.daysToExpiry)))]
+      .sort((a, b) => a - b)
+      .map(days => ({ value: days, label: `expiry in ${days}d` }))
+    return {
+      leverage: { _tag: 'Discrete', points: leveragePoints },
+      // Any horizon is reachable by rolling; expiries are soft-snap pins, and beyond the last one every hold rolls.
+      horizonDays: { _tag: 'Continuous', min: conventions.option.minDaysToExpiry, max: 3650, pins: expiries },
+    }
   },
 }
