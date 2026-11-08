@@ -12,5 +12,5 @@ export const chartModeDescription = (mode: ChartMode): string =>
   mode === 'Carry'
     ? 'What holding the position cost over time, as a percent of capital.'
     : mode === 'Payoff'
-      ? 'PnL at the end of the holding period against the price it ends at. Carry shifts the curve down; where carry floats, the shift is a band, not a line.'
+      ? 'PnL at the end of the holding period against the price it ends at. The dotted line is the benchmark: spot bought with unlimited credit at the dollar rate. Carry shifts each curve down; where it floats, the shift is a band.'
       : 'Equity along the realized path, with the day the position would have died.'

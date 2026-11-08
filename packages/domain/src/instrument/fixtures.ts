@@ -27,28 +27,10 @@ export const perpState = (overrides: Partial<PerpState> = {}): PerpState => ({
 });
 
 export const borrowState = (overrides: Partial<BorrowState> = {}): BorrowState => ({
-  venueId: "aave",
+  venueId: "sofr",
   assetId: "ETH",
   observedAt: OBSERVED_AT,
-  rate: {
-    venueId: "aave",
-    debtAssetId: "USDC",
-    observedAt: OBSERVED_AT,
-    borrowApr: 0.08,
-    supplyApr: Option.some(0.01),
-    utilization: Option.some(0.8),
-    fixedTermDays: Option.none(),
-  },
-  collateral: {
-    venueId: "aave",
-    assetId: "ETH",
-    debtAssetId: "USDC",
-    maxLtv: 0.8,
-    liquidationLtv: 0.825,
-    liquidationPenalty: 0.05,
-    loopingAllowed: true,
-  },
-  spotPrice: 3_000,
+  rate: { observedAt: OBSERVED_AT, apr: 0.045, source: "SOFR", termDays: Option.some(90) },
   ...overrides,
 });
 

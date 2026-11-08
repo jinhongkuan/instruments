@@ -14,7 +14,7 @@ import {
 
 // Reference data ----------------------------------------------------------
 
-export const instrumentKind = pgEnum('instrument_kind', ['perp', 'spot_borrow', 'option'])
+export const instrumentKind = pgEnum('instrument_kind', ['perp', 'benchmark', 'option'])
 
 /** Canonical asset, independent of any venue's naming. */
 export const assets = pgTable('assets', {
@@ -65,17 +65,20 @@ export const fundingRates = pgTable(
   table => [primaryKey({ columns: [table.venueInstrumentId, table.hour] })],
 )
 
-/** Lending market borrow rate snapshots, annualized. */
-export const borrowRates = pgTable(
-  'borrow_rates',
+/**
+ * Dollar interest rate benchmark (SOFR, T-bill, stablecoin term rate). Spot +
+ * borrow is modeled as unlimited credit at this rate, so no lending-market
+ * tables are needed.
+ */
+export const benchmarkRates = pgTable(
+  'benchmark_rates',
   {
-    venueInstrumentId: integer('venue_instrument_id').notNull().references(() => venueInstruments.id),
+    source: text('source').notNull(),
     observedAt: timestamp('observed_at', { withTimezone: true }).notNull(),
-    borrowApr: doublePrecision('borrow_apr').notNull(),
-    supplyApr: doublePrecision('supply_apr'),
-    liquidationLtv: doublePrecision('liquidation_ltv'),
+    apr: doublePrecision('apr').notNull(),
+    termDays: integer('term_days'),
   },
-  table => [primaryKey({ columns: [table.venueInstrumentId, table.observedAt] })],
+  table => [primaryKey({ columns: [table.source, table.observedAt] })],
 )
 
 export const optionType = pgEnum('option_type', ['call', 'put'])

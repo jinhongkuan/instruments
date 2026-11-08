@@ -1,4 +1,4 @@
-import { Array, Option, pipe } from 'effect'
+import { Array, Option } from 'effect'
 import { Command, Update } from 'foldkit'
 import { modifyFields } from 'foldkit/struct'
 
@@ -10,7 +10,6 @@ import type { Model } from './model'
 import {
   HORIZON_AXIS,
   LEVERAGE_AXIS,
-  kindFromChartHostId,
   normalizeTicker,
   softSnapDown,
   softSnapNearest,
@@ -39,14 +38,9 @@ const horizonPins = (model: Model): ReadonlyArray<number> =>
       : pinsOf(result.support.horizonDays),
   )
 
-const syncChart = (model: Model, hostId: string): ReadonlyArray<Command.Command<Message>> =>
-  pipe(
-    kindFromChartHostId(hostId),
-    Option.map(kind =>
-      SyncChart({ hostId, kind, mode: model.chartMode, comparison: model.comparison, separateCarry: model.separateCarry }),
-    ),
-    Array.fromOption,
-  )
+const syncChart = (model: Model, hostId: string): ReadonlyArray<Command.Command<Message>> => [
+  SyncChart({ hostId, mode: model.chartMode, comparison: model.comparison, separateCarry: model.separateCarry }),
+]
 
 const syncAllCharts = (model: Model): ReadonlyArray<Command.Command<Message>> =>
   Array.flatMap(model.mountedChartHostIds, hostId => syncChart(model, hostId))

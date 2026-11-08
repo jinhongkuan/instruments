@@ -9,7 +9,7 @@ import type { InstrumentResult } from '@instruments/domain'
 import { removeChart, setChart } from '../chartHost'
 import { type ChartMode, chartModeLabel } from '../chartMode'
 import { Message } from '../message'
-import { chartHostId } from '../scenario'
+import { CHART_HOST_ID } from '../scenario'
 import { formatPercent } from './format'
 
 type MountChartMessage =
@@ -89,76 +89,65 @@ const hasSeries = (result: InstrumentResult): boolean => result.exposureMultiple
 const carryKindLabel = (kind: InstrumentResult['carryBand']['kind']): string =>
   kind === 'Floating' ? 'Floating' : kind === 'Fixed' ? 'Fixed' : kind === 'Prepaid' ? 'Prepaid' : 'Streaming'
 
-export const chartCardView = (
-  result: InstrumentResult,
-  mode: ChartMode,
-  h: HtmlBuilder<Message>,
-): Html =>
+/** One chart for all instruments. The benchmark is the dotted line everything else is read against. */
+export const chartPanelView = (mode: ChartMode, h: HtmlBuilder<Message>): Html =>
+  h.section(
+    [h.Class('rounded-xl border bg-card text-card-foreground shadow-sm')],
+    [
+      h.div([
+        h.Class('h-[26rem] w-full'),
+        h.AriaLabel(`${chartModeLabel(mode)} chart`),
+        h.OnMount(MountChart({ hostId: CHART_HOST_ID })),
+      ]),
+    ],
+  )
+
+/** Per-instrument numbers under the chart. Greys out when the request could not be met. */
+export const statsCardView = (result: InstrumentResult, h: HtmlBuilder<Message>): Html =>
   h.section(
     [
       h.Key(result.kind),
       h.Class(
         result.resolved._tag === 'Unattainable'
-          ? 'flex flex-col rounded-xl border border-dashed bg-card text-card-foreground opacity-60 grayscale'
-          : 'flex flex-col rounded-xl border bg-card text-card-foreground shadow-sm',
+          ? 'flex flex-col gap-2 rounded-xl border border-dashed bg-card p-4 text-card-foreground opacity-60 grayscale'
+          : 'flex flex-col gap-2 rounded-xl border bg-card p-4 text-card-foreground shadow-sm',
       ),
     ],
     [
-      h.header(
-        [h.Class('flex items-start justify-between gap-3 border-b px-4 py-3')],
+      h.div(
+        [h.Class('flex items-center gap-2')],
         [
-          h.div(
-            [],
-            [
-              h.div(
-                [h.Class('flex items-center gap-2')],
-                [
-                  h.span([h.Class(`inline-block size-2.5 rounded-full ${kindClass(result.kind)}`)], []),
-                  h.h3([h.Class('text-sm font-semibold leading-none')], [result.label]),
-                ],
-              ),
-              h.p(
-                [h.Class('mt-1 text-xs text-muted-foreground')],
-                [`${result.venue} · ${leverageLabel(result)}`],
-              ),
-            ],
-          ),
           h.span(
-            [h.Class('rounded-md bg-secondary px-2 py-1 text-[11px] font-medium text-secondary-foreground')],
-            [chartModeLabel(mode)],
+            [h.Class(`inline-block h-0.5 w-5 ${kindClass(result.kind)} ${result.kind === 'SpotBorrow' ? 'opacity-70 [border-top:2px_dotted] bg-transparent border-chart-borrow' : ''}`)],
+            [],
           ),
+          h.h3([h.Class('text-sm font-semibold leading-none')], [result.label]),
         ],
       ),
-      h.div([
-        h.Class('h-64 w-full'),
-        h.AriaLabel(`${result.label} ${chartModeLabel(mode)} chart`),
-        h.OnMount(MountChart({ hostId: chartHostId(result.kind) })),
-      ]),
+      h.p([h.Class('text-xs text-muted-foreground')], [`${result.venue} · ${leverageLabel(result)}`]),
       h.p(
-        [h.Class('border-t px-4 pt-2 text-[11px] text-muted-foreground')],
+        [h.Class('text-[11px] text-muted-foreground')],
         [`${carryKindLabel(result.carryBand.kind)} carry · ${result.carryBand.basis}`],
       ),
-      h.footer(
-        [h.Class('grid grid-cols-3 gap-2 px-4 py-3 text-xs')],
-        [
-          ...(!hasSeries(result)
-            ? [h.div([h.Class('col-span-3 text-muted-foreground')], [result.resolved._tag === 'Unattainable' ? result.resolved.reason : 'No data'])]
-            : [
-                statView(
-                  result.carryBand.kind === 'Floating' ? 'Carry (p10–p90)' : 'Carry',
-                  result.carryBand.high - result.carryBand.low > 1e-9
-                    ? `${formatPercent(result.carryBand.low)} to ${formatPercent(result.carryBand.high)}`
-                    : formatPercent(result.carryBand.mid),
-                  h,
-                ),
-                statView('Terminal PnL', formatPercent(result.summary.terminalPnlPct), h),
-                statView(
-                  'Worst drawdown',
-                  result.summary.liquidated ? 'liquidated' : formatPercent(result.summary.maxDrawdownPct),
-                  h,
-                ),
-              ]),
-        ],
+      h.div(
+        [h.Class('mt-1 grid grid-cols-3 gap-2 border-t pt-3 text-xs')],
+        !hasSeries(result)
+          ? [h.div([h.Class('col-span-3 text-muted-foreground')], [result.resolved._tag === 'Unattainable' ? result.resolved.reason : 'No data'])]
+          : [
+              statView(
+                result.carryBand.kind === 'Floating' ? 'Carry (p10–p90)' : 'Carry',
+                result.carryBand.high - result.carryBand.low > 1e-9
+                  ? `${formatPercent(result.carryBand.low)} to ${formatPercent(result.carryBand.high)}`
+                  : formatPercent(result.carryBand.mid),
+                h,
+              ),
+              statView('Terminal PnL', formatPercent(result.summary.terminalPnlPct), h),
+              statView(
+                'Worst drawdown',
+                result.summary.liquidated ? 'liquidated' : formatPercent(result.summary.maxDrawdownPct),
+                h,
+              ),
+            ],
       ),
     ],
   )

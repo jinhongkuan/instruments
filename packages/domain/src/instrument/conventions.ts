@@ -14,22 +14,13 @@ export const Conventions = Schema.Struct({
     /** Equity left after liquidation, per unit of capital. 0 means the whole margin is lost. */
     equityRecoveredOnLiquidation: Schema.Number,
   }),
-  borrow: Schema.Struct({
+  benchmark: Schema.Struct({
     /**
-     * `Unsecured`: the holder has unlimited credit at the observed rate, so
-     * leverage is unbounded and nothing is liquidated; the loan is the paper's
-     * "against a loan" baseline. `Collateralized`: borrow against the spot
-     * position itself, capped by loan-to-value and liquidated past it.
+     * Spot + borrow is a benchmark with unlimited credit at a dollar rate. The
+     * rate observed at entry is treated as fixed for the horizon, so the line
+     * is the "against a loan" baseline every other instrument is read against.
      */
-    creditModel: Schema.Literals(['Unsecured', 'Collateralized']),
-    /**
-     * Collateralized only. Deposit spot, borrow the quote asset against it,
-     * buy more spot, repeat. One loop reaches at most 1 + maxLtv. Deep-market
-     * assumption: every loop fills at the observed rate with no price impact.
-     */
-    maxLoops: Schema.Number,
-    /** Whether supply yield on the held asset is netted against borrow cost. */
-    netSupplyYield: Schema.Boolean,
+    lockRateForHorizon: Schema.Boolean,
   }),
   option: Schema.Struct({
     /** Accept a contract whose effective leverage is within this fraction of the target. */
@@ -47,6 +38,6 @@ export type Conventions = typeof Conventions.Type
 export const DEFAULT_CONVENTIONS: Conventions = {
   version: '2026-11-v1',
   perp: { liquidateOnOracle: true, equityRecoveredOnLiquidation: 0 },
-  borrow: { creditModel: 'Unsecured', maxLoops: 1, netSupplyYield: true },
+  benchmark: { lockRateForHorizon: true },
   option: { leverageTolerance: 0.25, defaultRollSpreadFraction: 0.02, minDaysToExpiry: 7, amortization: 'Linear' },
 }

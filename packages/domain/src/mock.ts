@@ -35,7 +35,7 @@ const perpSupport: InstrumentSupport = {
   leverage: { _tag: 'Continuous', min: 1, max: PERP_MAX_LEVERAGE, pins: [] },
   horizonDays: anyHorizon,
 }
-// Unsecured credit at the observed rate: leverage is unbounded and nothing is liquidated.
+// Benchmark: unlimited credit at a dollar rate, so leverage is unbounded and nothing is liquidated.
 const borrowSupport: InstrumentSupport = {
   leverage: { _tag: 'Continuous', min: 1, max: 1000, pins: [] },
   horizonDays: anyHorizon,
@@ -63,10 +63,9 @@ const optionSupport = (random: () => number): InstrumentSupport => ({
 const TOLERANCE = DEFAULT_CONVENTIONS.option.leverageTolerance
 
 /** Synthetic annualized funding volatility used to width the floating-carry band. */
-const FUNDING_APR_SIGMA = 0.18
-const BORROW_APR_SIGMA = 0.03
+const FUNDING_APR_SIGMA = 0.1
+const BENCHMARK_APR = 0.045
 const Z_P90 = 1.2816
-const COUNTERFACTUAL_FIXED_APR = 0.116 + 0.02
 
 const flatBand = (kind: CarryBand['kind'], mid: number, basis: string): CarryBand => ({ kind, low: mid, mid, high: mid, basis })
 
@@ -82,15 +81,17 @@ const floatingBand = (
   return { kind, low: mid - halfWidth, mid, high: mid + halfWidth, basis }
 }
 
-const linearPayoff = (leverage: number, band: CarryBand): ReadonlyArray<PayoffPoint> =>
+/** Linear payoff net of carry. Left of the ruin ratio the position is gone, so the band collapses onto the floor. */
+const linearPayoff = (leverage: number, band: CarryBand, ruinRatio: Option.Option<number>): ReadonlyArray<PayoffPoint> =>
   Array.map(PAYOFF_GRID, ratio => {
     const beforeCarry = (ratio - 1) * leverage * 100
+    const ruined = Option.exists(ruinRatio, r => ratio <= r)
     return {
       terminalPriceRatio: ratio,
       beforeCarry,
-      low: Math.max(-100, beforeCarry - band.high),
-      mid: Math.max(-100, beforeCarry - band.mid),
-      high: Math.max(-100, beforeCarry - band.low),
+      low: ruined ? -100 : Math.max(-100, beforeCarry - band.high),
+      mid: ruined ? -100 : Math.max(-100, beforeCarry - band.mid),
+      high: ruined ? -100 : Math.max(-100, beforeCarry - band.low),
     }
   })
 
@@ -111,7 +112,6 @@ const unavailable = (
   exposureMultiple: 0,
   carryBand: flatBand(kind === 'Option' ? 'Prepaid' : 'Floating', 0, 'n/a'),
   ruinPriceRatio: Option.none(),
-  fixedCounterfactual: Option.none(),
   carryPctOfCapital: [],
   payoffAtHorizon: [],
   equityPctOfCapital: [],
@@ -251,13 +251,9 @@ const perp = (
     scenario.horizonDays,
     `p10–p90 of ${scenario.horizonDays}-day funding windows (synthetic)`,
   )
-  const payoff = linearPayoff(PERP_LEVERAGE, band)
-  const fixedCarryPct = COUNTERFACTUAL_FIXED_APR * (scenario.horizonDays / DAYS_PER_YEAR) * PERP_LEVERAGE * 100
-  const fixedCounterfactual = Array.map(PAYOFF_GRID, ratio => ({
-    day: ratio,
-    value: Math.max(-100, (ratio - 1) * PERP_LEVERAGE * 100 - fixedCarryPct),
-  }))
   const ruinRatio = PERP_LEVERAGE > 1 ? (1 - 1 / PERP_LEVERAGE) / (1 - PERP_MAINTENANCE_MARGIN) : 0
+  const maybeRuin = PERP_LEVERAGE > 1 ? Option.some(ruinRatio) : Option.none()
+  const payoff = linearPayoff(PERP_LEVERAGE, band, maybeRuin)
   return {
     kind: 'Perp',
     label: 'Perpetual future',
@@ -267,8 +263,7 @@ const perp = (
     horizonResolved,
     exposureMultiple: PERP_LEVERAGE,
     carryBand: band,
-    ruinPriceRatio: PERP_LEVERAGE > 1 ? Option.some(ruinRatio) : Option.none(),
-    fixedCounterfactual: Option.some(fixedCounterfactual),
+    ruinPriceRatio: maybeRuin,
     carryPctOfCapital: toSeries(carry),
     payoffAtHorizon: payoff,
     equityPctOfCapital: toSeries(equity),
@@ -291,14 +286,13 @@ const spotBorrow = (
   const horizonResolved = resolveHorizon(borrowSupport.horizonDays, scenario.horizonDays, TOLERANCE)
   const maybeLeverage = resolvedValue(resolved)
   if (Option.isNone(maybeLeverage)) {
-    return unavailable('SpotBorrow', 'Spot + borrow', 'Aave', borrowSupport, resolved, horizonResolved)
+    return unavailable('SpotBorrow', 'Spot + borrow (benchmark)', 'Dollar rate', borrowSupport, resolved, horizonResolved)
   }
   const BORROW_LEVERAGE = maybeLeverage.value
-  const baseApr = 0.06 + random() * 0.04
   const borrowedMultiple = BORROW_LEVERAGE - 1
   const dailyCarryPct = Array.makeBy(
     scenario.horizonDays,
-    () => (baseApr / DAYS_PER_YEAR) * borrowedMultiple * 100,
+    () => (BENCHMARK_APR / DAYS_PER_YEAR) * borrowedMultiple * 100,
   )
   const carry = cumulative(dailyCarryPct)
   const rawEquity = Array.zipWith(
@@ -319,26 +313,18 @@ const spotBorrow = (
     })),
   )
   const totalCarryPct = lastOr(carry, 0)
-  const band = floatingBand(
-    'Floating',
-    totalCarryPct,
-    BORROW_APR_SIGMA,
-    BORROW_LEVERAGE - 1,
-    scenario.horizonDays,
-    `p10–p90 of ${scenario.horizonDays}-day variable borrow windows, unlimited credit assumed (synthetic)`,
-  )
-  const payoff = linearPayoff(BORROW_LEVERAGE, band)
+  const band = flatBand('Fixed', totalCarryPct, `${(BENCHMARK_APR * 100).toFixed(1)}% dollar rate locked at entry, unlimited credit (benchmark)`)
+  const payoff = linearPayoff(BORROW_LEVERAGE, band, Option.none())
   return {
     kind: 'SpotBorrow',
-    label: 'Spot + borrow',
-    venue: 'Unsecured credit',
+    label: 'Spot + borrow (benchmark)',
+    venue: 'Dollar rate, unlimited credit',
     support: borrowSupport,
     resolved,
     horizonResolved,
     exposureMultiple: BORROW_LEVERAGE,
     carryBand: band,
     ruinPriceRatio: Option.none(),
-    fixedCounterfactual: Option.none(),
     carryPctOfCapital: toSeries(carry),
     payoffAtHorizon: payoff,
     equityPctOfCapital: toSeries(equity),
@@ -411,7 +397,6 @@ const call = (scenario: Scenario, prices: ReadonlyArray<number>, random: () => n
     exposureMultiple: omega,
     carryBand: band,
     ruinPriceRatio: Option.none(),
-    fixedCounterfactual: Option.none(),
     carryPctOfCapital: toSeries(carry),
     payoffAtHorizon: payoff,
     equityPctOfCapital: toSeries(equity),

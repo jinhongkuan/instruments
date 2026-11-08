@@ -1,6 +1,4 @@
-import { Array, Option, pipe } from 'effect'
-
-import { INSTRUMENT_KINDS, type InstrumentKind, type Scenario } from '@instruments/domain'
+import type { Scenario } from '@instruments/domain'
 
 export const DEFAULT_SCENARIO: Scenario = {
   ticker: 'BTC',
@@ -40,10 +38,4 @@ export const KNOWN_TICKERS: ReadonlyArray<string> = ['BTC', 'ETH', 'SOL', 'HYPE'
 export const normalizeTicker = (input: string): string =>
   input.trim().toUpperCase().replace(/[^A-Z0-9:-]/g, '')
 
-export const chartHostId = (kind: InstrumentKind): string => `chart-${kind}`
-
-export const kindFromChartHostId = (hostId: string): Option.Option<InstrumentKind> =>
-  pipe(
-    INSTRUMENT_KINDS,
-    Array.findFirst(kind => chartHostId(kind) === hostId),
-  )
+export const CHART_HOST_ID = 'chart-combined'

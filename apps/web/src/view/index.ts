@@ -7,7 +7,7 @@ import { Message } from '../message'
 import type { Model } from '../model'
 import { HORIZON_AXIS, KNOWN_TICKERS, LEVERAGE_AXIS } from '../scenario'
 import { axisSliderView } from './axis'
-import { chartCardView } from './chart'
+import { chartPanelView, statsCardView } from './chart'
 
 export const GITHUB_URL = 'https://github.com/jinhongkuan/instruments'
 
@@ -145,7 +145,7 @@ const slidersView = (model: Model, h: HtmlBuilder<Message>): Html =>
 
 const chartModeTabsView = (selected: ChartMode, h: HtmlBuilder<Message>): Html =>
   h.div(
-    [h.Class('inline-flex h-9 items-center rounded-lg bg-muted p-1 text-muted-foreground')],
+    [h.Class('inline-flex h-9 shrink-0 items-center whitespace-nowrap rounded-lg bg-muted p-1 text-muted-foreground')],
     Array.map(CHART_MODES, mode =>
       h.button(
         [
@@ -175,7 +175,7 @@ const separateCarryToggleView = (separate: boolean, h: HtmlBuilder<Message>): Ht
       ),
       h.OnClick(Message.ToggledSeparateCarry()),
     ],
-    ['Separate carry'],
+    ['Show before carry'],
   )
 
 const chartsSectionView = (model: Model, h: HtmlBuilder<Message>): Html =>
@@ -183,7 +183,7 @@ const chartsSectionView = (model: Model, h: HtmlBuilder<Message>): Html =>
     [h.Id('compare'), h.Class('flex flex-col gap-4')],
     [
       h.div(
-        [h.Class('flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between')],
+        [h.Class('flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between')],
         [
           h.div(
             [],
@@ -196,7 +196,7 @@ const chartsSectionView = (model: Model, h: HtmlBuilder<Message>): Html =>
             ],
           ),
           h.div(
-            [h.Class('flex items-center gap-2')],
+            [h.Class('flex shrink-0 items-center gap-2')],
             [
               ...(model.chartMode === 'Payoff' ? [separateCarryToggleView(model.separateCarry, h)] : []),
               chartModeTabsView(model.chartMode, h),
@@ -204,9 +204,10 @@ const chartsSectionView = (model: Model, h: HtmlBuilder<Message>): Html =>
           ),
         ],
       ),
+      chartPanelView(model.chartMode, h),
       h.div(
         [h.Class('grid gap-4 lg:grid-cols-3')],
-        Array.map(model.comparison.instruments, result => chartCardView(result, model.chartMode, h)),
+        Array.map(model.comparison.instruments, result => statsCardView(result, h)),
       ),
       Option.match(model.maybeChartError, {
         onNone: () => h.div([], []),

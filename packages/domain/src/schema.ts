@@ -71,8 +71,6 @@ export const InstrumentResult = Schema.Struct({
   carryBand: CarryBand,
   /** Price ratio below which the position is lost if touched at any point on the path. None for options. */
   ruinPriceRatio: Schema.Option(Schema.Number),
-  /** Payoff under a fixed-rate carry quote (trailing average plus dealer spread). Perps only; the gap to `mid` is the price of certainty. */
-  fixedCounterfactual: Schema.Option(Schema.Array(SeriesPoint)),
   carryPctOfCapital: Schema.Array(SeriesPoint),
   payoffAtHorizon: Schema.Array(PayoffPoint),
   equityPctOfCapital: Schema.Array(SeriesPoint),

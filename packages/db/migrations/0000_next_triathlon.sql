@@ -1,4 +1,4 @@
-CREATE TYPE "public"."instrument_kind" AS ENUM('perp', 'spot_borrow', 'option');--> statement-breakpoint
+CREATE TYPE "public"."instrument_kind" AS ENUM('perp', 'benchmark', 'option');--> statement-breakpoint
 CREATE TYPE "public"."option_type" AS ENUM('call', 'put');--> statement-breakpoint
 CREATE TABLE "assets" (
 	"id" serial PRIMARY KEY NOT NULL,
@@ -7,13 +7,12 @@ CREATE TABLE "assets" (
 	CONSTRAINT "assets_symbol_unique" UNIQUE("symbol")
 );
 --> statement-breakpoint
-CREATE TABLE "borrow_rates" (
-	"venue_instrument_id" integer NOT NULL,
+CREATE TABLE "benchmark_rates" (
+	"source" text NOT NULL,
 	"observed_at" timestamp with time zone NOT NULL,
-	"borrow_apr" double precision NOT NULL,
-	"supply_apr" double precision,
-	"liquidation_ltv" double precision,
-	CONSTRAINT "borrow_rates_venue_instrument_id_observed_at_pk" PRIMARY KEY("venue_instrument_id","observed_at")
+	"apr" double precision NOT NULL,
+	"term_days" integer,
+	CONSTRAINT "benchmark_rates_source_observed_at_pk" PRIMARY KEY("source","observed_at")
 );
 --> statement-breakpoint
 CREATE TABLE "daily_prices" (
@@ -76,7 +75,6 @@ CREATE TABLE "venues" (
 	CONSTRAINT "venues_slug_unique" UNIQUE("slug")
 );
 --> statement-breakpoint
-ALTER TABLE "borrow_rates" ADD CONSTRAINT "borrow_rates_venue_instrument_id_venue_instruments_id_fk" FOREIGN KEY ("venue_instrument_id") REFERENCES "public"."venue_instruments"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "daily_prices" ADD CONSTRAINT "daily_prices_asset_id_assets_id_fk" FOREIGN KEY ("asset_id") REFERENCES "public"."assets"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "funding_rates" ADD CONSTRAINT "funding_rates_venue_instrument_id_venue_instruments_id_fk" FOREIGN KEY ("venue_instrument_id") REFERENCES "public"."venue_instruments"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "option_quotes" ADD CONSTRAINT "option_quotes_venue_instrument_id_venue_instruments_id_fk" FOREIGN KEY ("venue_instrument_id") REFERENCES "public"."venue_instruments"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
