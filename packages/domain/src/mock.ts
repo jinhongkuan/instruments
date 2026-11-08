@@ -230,7 +230,7 @@ const call = (scenario: Scenario, prices: ReadonlyArray<number>): InstrumentResu
     pnlPctOfCapital: Math.max(0, ratio - 1) * contracts * 100 - 100,
   }))
   return {
-    kind: 'Call',
+    kind: 'Option',
     label: 'At-the-money call',
     venue: 'Derive',
     exposureMultiple: contracts,

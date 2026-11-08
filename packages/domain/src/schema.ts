@@ -1,10 +1,9 @@
 import { Schema } from 'effect'
 
-/** The three ways to hold leveraged long exposure. Rows of the README table. */
-export const InstrumentKind = Schema.Literals(['Perp', 'SpotBorrow', 'Call'])
-export type InstrumentKind = typeof InstrumentKind.Type
+import { InstrumentKind } from './instrument/common'
 
-export const INSTRUMENT_KINDS: ReadonlyArray<InstrumentKind> = ['Perp', 'SpotBorrow', 'Call']
+/** The three ways to hold leveraged long exposure. Rows of the README table. */
+export const INSTRUMENT_KINDS: ReadonlyArray<InstrumentKind> = ['Perp', 'SpotBorrow', 'Option']
 
 /** Fix the question: long X, capital C, horizon H, entered on D. */
 export const Scenario = Schema.Struct({

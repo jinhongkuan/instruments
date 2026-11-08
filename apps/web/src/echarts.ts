@@ -32,7 +32,7 @@ export const instrumentColor = (kind: InstrumentKind): string =>
   Match.value(kind).pipe(
     Match.when('Perp', () => '#3b82f6'),
     Match.when('SpotBorrow', () => '#10b981'),
-    Match.when('Call', () => '#f59e0b'),
+    Match.when('Option', () => '#f59e0b'),
     Match.exhaustive,
   )
 
