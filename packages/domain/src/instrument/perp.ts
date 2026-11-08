@@ -63,3 +63,108 @@ export type PerpQuoteDetail = typeof PerpQuoteDetail.Type
 // - requested leverage above tier max: LeverageNotAttainable with the cap
 // - mark/oracle divergence: liquidation is on mark, funding notional on oracle
 // - venues with 8h periods vs 1h: annualize by fundingPeriodsPerYear, never by 8760 blindly
+
+// ---------------------------------------------------------------------------
+// Formulas. All per unit of capital, long exposure, leverage L = exposure / capital.
+// ---------------------------------------------------------------------------
+
+import { Array, Option, Schema as S, pipe } from 'effect'
+
+import {
+  DAYS_PER_YEAR,
+  type InstrumentModel,
+  type LeveragedExposureQuote,
+  type Unavailable,
+  linearBreakeven,
+  linearNetPayoff,
+} from './common'
+import type { Conventions } from './conventions'
+
+/** Lowest tier governs small positions, which is the market-wide reference. */
+export const maxLeverage = (tiers: ReadonlyArray<MarginTier>): Option.Option<number> =>
+  pipe(
+    Array.head(tiers),
+    Option.map(tier => tier.maxLeverage),
+  )
+
+/**
+ * Long at leverage L with maintenance fraction mm is liquidated when
+ *   1/L + (r − 1) = mm · r   ⇒   r* = (1 − 1/L) / (1 − mm).
+ * At L = 1 there is no debt and no liquidation.
+ */
+export const liquidationPriceRatio = (leverage: number, maintenanceFraction: number): Option.Option<number> =>
+  leverage <= 1 ? Option.none() : Option.some((1 - 1 / leverage) / (1 - maintenanceFraction))
+
+/** Per-period funding rate annualized onto notional. Positive means the long pays. */
+export const annualizedFunding = (ratePerPeriod: number, periodsPerYear: number): number =>
+  ratePerPeriod * periodsPerYear
+
+export const perpModel: InstrumentModel<PerpState, PerpQuoteDetail> = {
+  kind: 'Perp',
+
+  quote: (state, leverage, horizonDays, conventions): LeveragedExposureQuote | Unavailable => {
+    const maybeMax = maxLeverage(state.marginTiers)
+    if (Option.isNone(maybeMax)) {
+      return { _tag: 'NoObservation', kind: 'Perp', observedAt: state.observedAt }
+    }
+    if (leverage > maybeMax.value) {
+      return {
+        _tag: 'LeverageNotAttainable',
+        kind: 'Perp',
+        requested: leverage,
+        maximum: maybeMax.value,
+        reason: `Venue caps leverage at ${maybeMax.value}x for the lowest margin tier`,
+      }
+    }
+    const tier = state.marginTiers[0]!
+    if (1 / leverage <= tier.maintenanceMarginFraction) {
+      return {
+        _tag: 'LeverageNotAttainable',
+        kind: 'Perp',
+        requested: leverage,
+        maximum: 1 / tier.maintenanceMarginFraction,
+        reason: `Initial margin 1/${leverage} would not clear maintenance ${tier.maintenanceMarginFraction}`,
+      }
+    }
+    const carryRate = annualizedFunding(state.funding.rate, state.fundingPeriodsPerYear)
+    const carryOnCapital = carryRate * leverage
+    const ruin = liquidationPriceRatio(leverage, tier.maintenanceMarginFraction)
+    const detail: PerpQuoteDetail = {
+      maintenanceMarginFraction: tier.maintenanceMarginFraction,
+      liquidationPriceRatio: Option.getOrElse(ruin, () => 0),
+      fundingRatePerPeriod: state.funding.rate,
+      receivesFunding: state.funding.rate < 0,
+    }
+    return {
+      kind: 'Perp',
+      venueId: state.venueId,
+      assetId: state.assetId,
+      observedAt: state.observedAt,
+      leverage,
+      achievedLeverage: leverage,
+      carryKind: 'Floating',
+      carryRate,
+      carryOnCapital,
+      payoffShape: 'Linear',
+      ruinMode: Option.isSome(ruin) ? 'Liquidation' : 'None',
+      ruinPriceRatio: ruin,
+      breakevenPriceRatio: linearBreakeven(leverage, carryOnCapital, horizonDays),
+      capitalPerExposure: 1 / leverage,
+      detail,
+      conventionsVersion: conventions.version,
+    }
+  },
+
+  payoff: (quote, _detail, terminal, horizonDays) =>
+    Option.isSome(quote.ruinPriceRatio) && terminal <= quote.ruinPriceRatio.value
+      ? -1
+      : Math.max(-1, linearNetPayoff(quote.achievedLeverage, quote.carryOnCapital, terminal, horizonDays)),
+
+  carryStep: (quote, state, stepHours) =>
+    state.funding.rate * (stepHours / state.funding.periodHours) * quote.achievedLeverage,
+
+  decodeDetail: quote => S.decodeUnknownSync(PerpQuoteDetail)(quote.detail),
+}
+
+export const perpCarryOverDays = (ratePerPeriod: number, periodsPerYear: number, leverage: number, days: number): number =>
+  annualizedFunding(ratePerPeriod, periodsPerYear) * leverage * (days / DAYS_PER_YEAR)
