@@ -401,9 +401,15 @@ const call = (scenario: Scenario, prices: ReadonlyArray<number>, random: () => n
     return intrinsic + extrinsic
   }
   const equity = Array.map(prices, (price, index) => timeValueAt(index, price) * contracts * 100)
-  const carry = Array.map(prices, (price, index) => {
-    const intrinsicValue = Math.max(0, price - 1) * contracts * 100
-    return Math.max(0, 100 - (equity[index] ?? 0) + (intrinsicValue > 0 ? intrinsicValue - Math.max(0, (prices[index] ?? 1) - 1) * contracts * 100 : 0))
+  // Prepaid carry is theta: the premium amortizes linearly over each tenor, and every
+  // roll adds the spread paid. It is deterministic at entry, so no band.
+  const tenorForCarry = OPTION_EXPIRIES.find(days => days >= scenario.horizonDays) ?? OPTION_EXPIRIES[OPTION_EXPIRIES.length - 1]!
+  const rollSpreadStep = DEFAULT_CONVENTIONS.option.defaultRollSpreadFraction * 100
+  const carry = Array.makeBy(scenario.horizonDays, index => {
+    const day = index + 1
+    const completedRolls = Math.floor((day - 1) / tenorForCarry)
+    const dayInTenor = day - completedRolls * tenorForCarry
+    return Math.min(100, (dayInTenor / tenorForCarry) * 100) * (completedRolls === 0 ? 1 : 1) + completedRolls * rollSpreadStep
   })
   const terminalPrice = lastOr(prices, 1)
   const pathEvents: ReadonlyArray<PathEvent> =
