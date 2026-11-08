@@ -62,6 +62,47 @@ const optionSupport = (random: () => number): InstrumentSupport => ({
 
 const TOLERANCE = DEFAULT_CONVENTIONS.option.leverageTolerance
 
+export const RUIN_HORIZONS: ReadonlyArray<number> = [7, 14, 30, 60, 90, 120, 180, 270, 365, 540, 730]
+
+/** Standard normal CDF via the Abramowitz–Stegun erf approximation (max error ~1.5e-7). */
+const normalCdf = (x: number): number => {
+  const t = 1 / (1 + 0.3275911 * Math.abs(x) / Math.SQRT2)
+  const poly = t * (0.254829592 + t * (-0.284496736 + t * (1.421413741 + t * (-1.453152027 + t * 1.061405429))))
+  const erf = 1 - poly * Math.exp(-(x * x) / 2)
+  return 0.5 * (1 + (x < 0 ? -erf : erf))
+}
+
+/**
+ * Probability that a driftless lognormal path touches a barrier b < 1 within T years
+ * (reflection principle): P(min S/S0 <= b) = 2 Φ(ln b / (σ √T)).
+ */
+const barrierHitProbability = (barrier: number, sigma: number, years: number): number =>
+  barrier >= 1 ? 1 : barrier <= 0 || years <= 0 ? 0 : Math.min(1, 2 * normalCdf(Math.log(barrier) / (sigma * Math.sqrt(years))))
+
+/**
+ * Perp ruin by horizon. Funding drains margin, so the barrier rises with the
+ * expected carry: equity = 1/L + (r − 1) − c_T ≤ mm · r  ⇒  r* = (1 − 1/L + c_T) / (1 − mm),
+ * with c_T the expected carry over T as a fraction of notional.
+ */
+const perpRuinByHorizon = (leverage: number, sigma: number, fundingApr: number): ReadonlyArray<SeriesPoint> =>
+  Array.map(RUIN_HORIZONS, days => {
+    const years = days / DAYS_PER_YEAR
+    const carryOnNotional = Math.max(0, fundingApr) * years
+    const barrier = leverage > 1 ? (1 - 1 / leverage + carryOnNotional) / (1 - PERP_MAINTENANCE_MARGIN) : 0
+    return { day: days, value: barrierHitProbability(barrier, sigma, years) }
+  })
+
+/** Option ruin: the final leg expires out of the money. For an ATM strike this is Φ(σ√T / 2) on the last tenor. */
+const optionRuinByHorizon = (moneyness: number, sigma: number): ReadonlyArray<SeriesPoint> =>
+  Array.map(RUIN_HORIZONS, days => {
+    const tenor = OPTION_EXPIRIES.find(expiry => expiry >= days) ?? OPTION_EXPIRIES[OPTION_EXPIRIES.length - 1]!
+    const years = Math.min(days, tenor) / DAYS_PER_YEAR
+    const d = (Math.log(moneyness) + (sigma * sigma * years) / 2) / (sigma * Math.sqrt(years))
+    return { day: days, value: normalCdf(d) }
+  })
+
+const zeroRuinByHorizon: ReadonlyArray<SeriesPoint> = Array.map(RUIN_HORIZONS, days => ({ day: days, value: 0 }))
+
 /** Synthetic annualized funding volatility used to width the floating-carry band. */
 const FUNDING_APR_SIGMA = 0.1
 const BENCHMARK_APR = 0.045
@@ -114,6 +155,7 @@ const unavailable = (
   ruinPriceRatio: Option.none(),
   carryPctOfCapital: [],
   payoffAtHorizon: [],
+  ruinProbabilityByHorizon: [],
   equityPctOfCapital: [],
   pathEvents: [],
   summary: { totalCarryPct: 0, terminalPnlPct: 0, maxDrawdownPct: 0, liquidated: false },
@@ -266,6 +308,7 @@ const perp = (
     ruinPriceRatio: maybeRuin,
     carryPctOfCapital: toSeries(carry),
     payoffAtHorizon: payoff,
+    ruinProbabilityByHorizon: perpRuinByHorizon(PERP_LEVERAGE, assetVolatility(scenario.ticker), 0.0000125 * 8760),
     equityPctOfCapital: toSeries(equity),
     pathEvents,
     summary: {
@@ -327,6 +370,7 @@ const spotBorrow = (
     ruinPriceRatio: Option.none(),
     carryPctOfCapital: toSeries(carry),
     payoffAtHorizon: payoff,
+    ruinProbabilityByHorizon: zeroRuinByHorizon,
     equityPctOfCapital: toSeries(equity),
     pathEvents,
     summary: {
@@ -399,6 +443,7 @@ const call = (scenario: Scenario, prices: ReadonlyArray<number>, random: () => n
     ruinPriceRatio: Option.none(),
     carryPctOfCapital: toSeries(carry),
     payoffAtHorizon: payoff,
+    ruinProbabilityByHorizon: optionRuinByHorizon(1, assetVolatility(scenario.ticker)),
     equityPctOfCapital: toSeries(equity),
     pathEvents,
     summary: {

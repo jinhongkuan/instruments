@@ -282,10 +282,59 @@ const pathOption = (comparison: Comparison): EChartsOption => {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Ruin: probability of total loss by holding period, one line per instrument.
+// ---------------------------------------------------------------------------
+
+const ruinOption = (comparison: Comparison, horizonDays: number): EChartsOption => {
+  const results = live(comparison)
+  const horizons = Array.map(results[0]?.ruinProbabilityByHorizon ?? [], point => point.day)
+  const label = (days: number): string => (days >= 365 ? `${(days / 365).toFixed(days % 365 === 0 ? 0 : 1)}y` : `${days}d`)
+  const current = horizons.reduce((best, d) => (Math.abs(d - horizonDays) < Math.abs(best - horizonDays) ? d : best), horizons[0] ?? 7)
+  return {
+    ...baseOption(),
+    tooltip: { trigger: 'axis', confine: true, valueFormatter: value => `${value}%` },
+    legend: { ...baseOption().legend, data: results.map(seriesName) },
+    xAxis: {
+      type: 'category',
+      boundaryGap: false,
+      name: 'holding period',
+      nameLocation: 'middle',
+      nameGap: 28,
+      nameTextStyle: { color: '#71717a', fontSize: 11 },
+      data: Array.map(horizons, label),
+      axisLabel: { color: '#71717a' },
+    },
+    yAxis: { ...percentAxis('probability of total loss'), min: 0, max: 100 },
+    series: results.map((result, index) => ({
+      name: seriesName(result),
+      type: 'line' as const,
+      showSymbol: true,
+      symbolSize: 6,
+      lineStyle: lineStyleFor(result),
+      itemStyle: { color: instrumentColor(result.kind) },
+      ...(result.kind === 'Perp' ? { areaStyle: { color: instrumentColor(result.kind), opacity: 0.08 } } : {}),
+      data: Array.map(result.ruinProbabilityByHorizon, point => round(point.value * 100)),
+      ...(index === 0
+        ? {
+            markLine: {
+              symbol: 'none',
+              silent: true,
+              lineStyle: { color: PRICE_COLOR, type: 'dashed' as const },
+              label: { color: '#71717a', fontSize: 10, formatter: 'selected' },
+              data: [{ xAxis: label(current) }] as never,
+            },
+          }
+        : {}),
+    })),
+  }
+}
+
 export type ChartOptionArgs = Readonly<{
   mode: ChartMode
   comparison: Comparison
   separateCarry: boolean
+  horizonDays: number
 }>
 
 export const makeChartOption = (args: ChartOptionArgs): EChartsOption =>
@@ -293,5 +342,6 @@ export const makeChartOption = (args: ChartOptionArgs): EChartsOption =>
     Match.when('Payoff', () => payoffOption(args.comparison, args.separateCarry)),
     Match.when('Carry', () => carryOption(args.comparison)),
     Match.when('Path', () => pathOption(args.comparison)),
+    Match.when('Ruin', () => ruinOption(args.comparison, args.horizonDays)),
     Match.exhaustive,
   )

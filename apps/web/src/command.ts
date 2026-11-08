@@ -14,6 +14,7 @@ export const SyncChart = Command.define('SyncChart', {
     mode: ChartMode,
     comparison: Comparison,
     separateCarry: Schema.Boolean,
+    horizonDays: Schema.Number,
   },
   messages: [Message.SucceededSyncChart, Message.FailedSyncChart],
   execute: args =>

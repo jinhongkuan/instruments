@@ -39,7 +39,13 @@ const horizonPins = (model: Model): ReadonlyArray<number> =>
   )
 
 const syncChart = (model: Model, hostId: string): ReadonlyArray<Command.Command<Message>> => [
-  SyncChart({ hostId, mode: model.chartMode, comparison: model.comparison, separateCarry: model.separateCarry }),
+  SyncChart({
+    hostId,
+    mode: model.chartMode,
+    comparison: model.comparison,
+    separateCarry: model.separateCarry,
+    horizonDays: model.scenario.horizonDays,
+  }),
 ]
 
 const syncAllCharts = (model: Model): ReadonlyArray<Command.Command<Message>> =>

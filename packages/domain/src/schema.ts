@@ -73,6 +73,13 @@ export const InstrumentResult = Schema.Struct({
   ruinPriceRatio: Schema.Option(Schema.Number),
   carryPctOfCapital: Schema.Array(SeriesPoint),
   payoffAtHorizon: Schema.Array(PayoffPoint),
+  /**
+   * Probability (0–1) of losing the whole position by each holding period, at
+   * the resolved leverage. Perp: path touches the liquidation ratio. Option:
+   * the final contract expires out of the money. Benchmark: zero, nothing can
+   * force it out. `day` is the holding period in days.
+   */
+  ruinProbabilityByHorizon: Schema.Array(SeriesPoint),
   equityPctOfCapital: Schema.Array(SeriesPoint),
   pathEvents: Schema.Array(PathEvent),
   summary: Schema.Struct({
