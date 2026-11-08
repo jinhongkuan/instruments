@@ -67,12 +67,15 @@ export const MountChart = Mount.defineStream('MountChart', {
   execute: ({ element, hostId }) => mountChart(element, hostId),
 })
 
-const kindClass = (result: InstrumentResult): string =>
-  result.kind === 'Perp'
-    ? 'bg-chart-perp'
-    : result.kind === 'SpotBorrow'
-      ? 'bg-chart-borrow'
-      : 'bg-chart-call'
+export const kindClass = (kind: InstrumentResult['kind']): string =>
+  kind === 'Perp' ? 'bg-chart-perp' : kind === 'SpotBorrow' ? 'bg-chart-borrow' : 'bg-chart-option'
+
+const leverageLabel = (result: InstrumentResult): string =>
+  result.resolved._tag === 'Exact'
+    ? `${result.resolved.leverage.toFixed(2)}x`
+    : result.resolved._tag === 'SnappedDown'
+      ? `${result.resolved.leverage.toFixed(2)}x (snapped down from ${result.resolved.requested.toFixed(2)}x)`
+      : `not available at ${result.resolved.requested.toFixed(2)}x`
 
 export const chartCardView = (
   result: InstrumentResult,
@@ -82,7 +85,11 @@ export const chartCardView = (
   h.section(
     [
       h.Key(result.kind),
-      h.Class('flex flex-col rounded-xl border bg-card text-card-foreground shadow-sm'),
+      h.Class(
+        result.resolved._tag === 'Unattainable'
+          ? 'flex flex-col rounded-xl border border-dashed bg-card text-card-foreground opacity-60 grayscale'
+          : 'flex flex-col rounded-xl border bg-card text-card-foreground shadow-sm',
+      ),
     ],
     [
       h.header(
@@ -94,13 +101,13 @@ export const chartCardView = (
               h.div(
                 [h.Class('flex items-center gap-2')],
                 [
-                  h.span([h.Class(`inline-block size-2.5 rounded-full ${kindClass(result)}`)], []),
+                  h.span([h.Class(`inline-block size-2.5 rounded-full ${kindClass(result.kind)}`)], []),
                   h.h3([h.Class('text-sm font-semibold leading-none')], [result.label]),
                 ],
               ),
               h.p(
                 [h.Class('mt-1 text-xs text-muted-foreground')],
-                [`${result.venue} · ${result.exposureMultiple.toFixed(1)}x exposure`],
+                [`${result.venue} · ${leverageLabel(result)}`],
               ),
             ],
           ),
@@ -118,13 +125,17 @@ export const chartCardView = (
       h.footer(
         [h.Class('grid grid-cols-3 gap-2 border-t px-4 py-3 text-xs')],
         [
-          statView('Carry', formatPercent(result.summary.totalCarryPct), h),
-          statView('Terminal PnL', formatPercent(result.summary.terminalPnlPct), h),
-          statView(
-            'Worst drawdown',
-            result.summary.liquidated ? 'liquidated' : formatPercent(result.summary.maxDrawdownPct),
-            h,
-          ),
+          ...(result.resolved._tag === 'Unattainable'
+            ? [h.div([h.Class('col-span-3 text-muted-foreground')], [result.resolved.reason])]
+            : [
+                statView('Carry', formatPercent(result.summary.totalCarryPct), h),
+                statView('Terminal PnL', formatPercent(result.summary.terminalPnlPct), h),
+                statView(
+                  'Worst drawdown',
+                  result.summary.liquidated ? 'liquidated' : formatPercent(result.summary.maxDrawdownPct),
+                  h,
+                ),
+              ]),
         ],
       ),
     ],

@@ -7,7 +7,14 @@ import { mockComparison } from '@instruments/domain'
 import { SyncChart } from './command'
 import { Message } from './message'
 import type { Model } from './model'
-import { kindFromChartHostId, scenarioFromInputs } from './scenario'
+import { kindFromChartHostId, leverageFromSlider, scenarioFromInputs, softSnapDown } from './scenario'
+
+const SNAP_WINDOW = 0.04
+
+const discretePins = (model: Model): ReadonlyArray<number> =>
+  model.comparison.instruments.flatMap(result =>
+    result.support._tag === 'Discrete' ? result.support.points.map(point => point.leverage) : [],
+  )
 
 type UpdateReturn = Update.Return<Model, Message>
 
@@ -45,12 +52,25 @@ export const update = (model: Model, message: Message) =>
         capitalInput: model.capitalInput,
         horizonInput: model.horizonInput,
         entryDate: model.scenario.entryDate,
+        leverage: model.scenario.leverage,
       })
       return withSync(
         modifyFields(model, {
           tickerInput: () => scenario.ticker,
           capitalInput: () => String(scenario.capitalUsd),
           horizonInput: () => String(scenario.horizonDays),
+          scenario: () => scenario,
+          comparison: () => mockComparison(scenario),
+        }),
+      )
+    },
+
+    UpdatedLeverageSlider: ({ position }) => {
+      const raw = leverageFromSlider(Math.min(1, Math.max(0, position)))
+      const leverage = Math.round(softSnapDown(raw, discretePins(model), SNAP_WINDOW) * 100) / 100
+      const scenario = { ...model.scenario, leverage }
+      return withSync(
+        modifyFields(model, {
           scenario: () => scenario,
           comparison: () => mockComparison(scenario),
         }),

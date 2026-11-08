@@ -21,9 +21,9 @@
   --border: oklch(0.92 0.004 286.32);
   --input: oklch(0.92 0.004 286.32);
   --ring: oklch(0.705 0.015 286.067);
-  --chart-perp: oklch(0.6 0.19 250);
-  --chart-borrow: oklch(0.65 0.17 150);
-  --chart-call: oklch(0.7 0.18 50);
+  --chart-perp: #e5484d;
+  --chart-borrow: #30a46c;
+  --chart-option: #3e7bfa;
   --chart-price: oklch(0.55 0.02 286);
   --radius: 0.625rem;
 }
@@ -72,7 +72,7 @@
   --color-ring: var(--ring);
   --color-chart-perp: var(--chart-perp);
   --color-chart-borrow: var(--chart-borrow);
-  --color-chart-call: var(--chart-call);
+  --color-chart-option: var(--chart-option);
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);

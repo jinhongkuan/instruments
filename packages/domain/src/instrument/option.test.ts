@@ -52,10 +52,20 @@ describe("selectContract", () => {
     call({ strike: 100_000, premium: 1_000, delta: Option.some(0.5), expiry: Option.some("2026-01-03T08:00:00.000Z") }),
   ];
 
-  it("picks the call nearest the target leverage and ignores puts", () => {
+  it("picks the highest call at or below the target leverage and ignores puts", () => {
     const c = Option.getOrThrow(selectContract(chain, OBSERVED_AT, 7, 7));
     expect(c.quote.strike).toBe(100_000);
     expect(c.quote.premium).toBe(8_000);
+  });
+
+  it("snaps down: a 9x request takes the 6.9x call, not the nearer 10x call", () => {
+    const c = Option.getOrThrow(selectContract(chain, OBSERVED_AT, 9, 7));
+    expect(c.omega).toBeCloseTo(6.875, 6);
+  });
+
+  it("falls back to the nearest contract when nothing sits below the target", () => {
+    const c = Option.getOrThrow(selectContract(chain, OBSERVED_AT, 2, 7));
+    expect(c.omega).toBeCloseTo(5.357, 2);
   });
 
   it("ignores contracts expiring sooner than minDaysToExpiry", () => {
@@ -89,6 +99,18 @@ describe("optionModel.quote", () => {
   it("LeverageNotAttainable when the nearest contract is outside tolerance", () => {
     const q = optionModel.quote(optionState(chain), 40, 90, C);
     expect(isUnavailable(q) && q._tag === "LeverageNotAttainable" && Math.abs(q.maximum - 10) < 1e-9).toBe(true);
+  });
+
+  it("never snaps up: a 4x request has no call at or below it within reach", () => {
+    const q = optionModel.quote(optionState(chain), 4, 90, C);
+    expect(isUnavailable(q) && q._tag === "LeverageNotAttainable").toBe(true);
+  });
+
+  it("support lists one pin per eligible call, sorted by leverage", () => {
+    const s = optionModel.support(optionState(chain), C);
+    if (s._tag !== "Discrete") throw new Error(s._tag);
+    expect(s.points.map(p => Number(p.leverage.toFixed(2)))).toEqual([5.36, 6.88, 10]);
+    expect(s.points[1]!.label).toBe("100,000 call, 2026-03-27");
   });
 
   it("a 7x request lands on the ATM call: Prepaid, Convex, Expiry, no rolls for an 85-day tenor", () => {

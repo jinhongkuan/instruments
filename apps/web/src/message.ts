@@ -8,6 +8,7 @@ export const Message = defineMessageUnion({
   UpdatedCapitalInput: { value: Schema.String },
   UpdatedHorizonInput: { value: Schema.String },
   SubmittedScenario: {},
+  UpdatedLeverageSlider: { position: Schema.Number },
   SelectedChartMode: { mode: ChartMode },
   SucceededMountChart: { hostId: Schema.String },
   FailedMountChart: { reason: Schema.String },

@@ -182,4 +182,9 @@ export const borrowModel: InstrumentModel<BorrowState, BorrowQuoteDetail> = {
   carryStep: (quote, _state, stepHours) => quote.carryOnCapital * (stepHours / 8760),
 
   decodeDetail: quote => S.decodeUnknownSync(BorrowQuoteDetail)(quote.detail),
+
+  support: (state, conventions) => {
+    const loops = state.collateral.loopingAllowed ? conventions.borrow.maxLoops : 1
+    return { _tag: 'Continuous', min: 1, max: maxLeverage(state.collateral.maxLtv, loops) }
+  },
 }

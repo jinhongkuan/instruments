@@ -144,17 +144,39 @@ const toCandidate =
     return Option.some({ quote, omega, error: Math.abs(omega - target) / target, daysToExpiry })
   }
 
-/** The listed call whose effective leverage is nearest the target. */
+export const candidates = (
+  chain: ReadonlyArray<OptionQuote>,
+  observedAt: string,
+  target: number,
+  minDaysToExpiry: number,
+): ReadonlyArray<Candidate> =>
+  chain.flatMap(quote => Array.fromOption(toCandidate(observedAt, minDaysToExpiry, target)(quote)))
+
+/**
+ * Snap DOWN: the listed call with the highest effective leverage at or below
+ * the target. Falls back to the overall nearest only when nothing sits below,
+ * so the caller can report what the floor is.
+ */
 export const selectContract = (
   chain: ReadonlyArray<OptionQuote>,
   observedAt: string,
   target: number,
   minDaysToExpiry: number,
 ): Option.Option<Candidate> => {
-  const candidates = chain
-    .flatMap(quote => Array.fromOption(toCandidate(observedAt, minDaysToExpiry, target)(quote)))
-    .sort((a, b) => a.error - b.error)
-  return Option.fromNullishOr(candidates[0])
+  const all = candidates(chain, observedAt, target, minDaysToExpiry)
+  const below = all.filter(c => c.omega <= target * (1 + 1e-9)).sort((a, b) => b.omega - a.omega)
+  if (below.length > 0) {
+    return Option.some(below[0]!)
+  }
+  return Option.fromNullishOr([...all].sort((a, b) => a.error - b.error)[0])
+}
+
+export const contractLabel = (quote: OptionQuote): string => {
+  const expiry = Option.match(quote.expiry, {
+    onNone: () => 'perpetual',
+    onSome: iso => iso.slice(0, 10),
+  })
+  return `${quote.strike.toLocaleString('en-US')} call, ${expiry}`
 }
 
 export const optionModel: InstrumentModel<OptionState, OptionQuoteDetail> = {
@@ -176,7 +198,7 @@ export const optionModel: InstrumentModel<OptionState, OptionQuoteDetail> = {
       return { _tag: 'NoObservation', kind: 'Option', observedAt: state.observedAt }
     }
     const { quote, omega, error, daysToExpiry } = selected.value
-    if (error > conventions.option.leverageTolerance) {
+    if (omega > leverage * (1 + 1e-9) || error > conventions.option.leverageTolerance) {
       return {
         _tag: 'LeverageNotAttainable',
         kind: 'Option',
@@ -227,4 +249,16 @@ export const optionModel: InstrumentModel<OptionState, OptionQuoteDetail> = {
   carryStep: (quote, _state, stepHours) => quote.carryOnCapital * (stepHours / 8760),
 
   decodeDetail: quote => S.decodeUnknownSync(OptionQuoteDetail)(quote.detail),
+
+  support: (state, conventions) => {
+    if (state.style === 'Perpetual') {
+      return { _tag: 'None', reason: 'Perpetual options unsupported in v1' }
+    }
+    const points = candidates(state.chain, state.observedAt, 1, conventions.option.minDaysToExpiry)
+      .map(c => ({ leverage: c.omega, label: contractLabel(c.quote) }))
+      .sort((a, b) => a.leverage - b.leverage)
+    return points.length === 0
+      ? { _tag: 'None', reason: 'No listed calls for this asset' }
+      : { _tag: 'Discrete', points }
+  },
 }

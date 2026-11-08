@@ -1,4 +1,4 @@
-import { Schema } from "effect";
+import { Option, Schema } from "effect";
 
 import type { Conventions } from "./conventions";
 
@@ -154,6 +154,86 @@ export const Unavailable = Schema.Union([
 ]);
 export type Unavailable = typeof Unavailable.Type;
 
+/**
+ * Which leverages an instrument can actually deliver for an asset right now.
+ * Perps and borrow are continuous up to a cap; options are one point per
+ * listed contract. The dashboard slider is drawn from this, and `quote` must
+ * agree with it.
+ */
+export const LeveragePoint = Schema.Struct({
+  leverage: Leverage,
+  /** Human label for the pin, e.g. "100k call, 27 Mar". */
+  label: Schema.String,
+});
+export type LeveragePoint = typeof LeveragePoint.Type;
+
+export const LeverageSupport = Schema.Union([
+  Schema.TaggedStruct("Continuous", { min: Leverage, max: Leverage }),
+  Schema.TaggedStruct("Discrete", { points: Schema.Array(LeveragePoint) }),
+  Schema.TaggedStruct("None", { reason: Schema.String }),
+]);
+export type LeverageSupport = typeof LeverageSupport.Type;
+
+export const Resolved = Schema.Union([
+  Schema.TaggedStruct("Exact", { leverage: Leverage }),
+  Schema.TaggedStruct("SnappedDown", { requested: Leverage, leverage: Leverage, label: Schema.String }),
+  Schema.TaggedStruct("Unattainable", { requested: Leverage, nearest: Schema.Option(Leverage), reason: Schema.String }),
+]);
+export type Resolved = typeof Resolved.Type;
+
+/**
+ * Map a requested leverage onto what the instrument supports. Continuous
+ * support is exact up to the cap. Discrete support snaps DOWN to the highest
+ * point at or below the request, and only if it is within `tolerance`
+ * (relative). Snapping up would hand the user more risk than they asked for.
+ */
+export const resolveLeverage = (
+  support: LeverageSupport,
+  requested: number,
+  tolerance: number,
+): Resolved => {
+  switch (support._tag) {
+    case "None":
+      return { _tag: "Unattainable", requested, nearest: Option.none(), reason: support.reason };
+    case "Continuous":
+      if (requested < support.min) {
+        return { _tag: "Unattainable", requested, nearest: Option.some(support.min), reason: `Minimum is ${support.min}x` };
+      }
+      if (requested > support.max) {
+        return { _tag: "Unattainable", requested, nearest: Option.some(support.max), reason: `Maximum is ${support.max.toFixed(2)}x` };
+      }
+      return { _tag: "Exact", leverage: requested };
+    case "Discrete": {
+      const below = support.points
+        .filter(p => p.leverage <= requested * (1 + 1e-9))
+        .sort((a, b) => b.leverage - a.leverage)[0];
+      const nearestAny = [...support.points].sort(
+        (a, b) => Math.abs(a.leverage - requested) - Math.abs(b.leverage - requested),
+      )[0];
+      if (below === undefined) {
+        return {
+          _tag: "Unattainable",
+          requested,
+          nearest: Option.fromNullishOr(nearestAny?.leverage),
+          reason: nearestAny ? `Lowest listed contract delivers ${nearestAny.leverage.toFixed(2)}x` : "No contracts listed",
+        };
+      }
+      const error = (requested - below.leverage) / requested;
+      if (error > tolerance) {
+        return {
+          _tag: "Unattainable",
+          requested,
+          nearest: Option.some(below.leverage),
+          reason: `Nearest contract at or below delivers ${below.leverage.toFixed(2)}x (${(error * 100).toFixed(0)}% short)`,
+        };
+      }
+      return Math.abs(error) < 1e-9
+        ? { _tag: "Exact", leverage: below.leverage }
+        : { _tag: "SnappedDown", requested, leverage: below.leverage, label: below.label };
+    }
+  }
+};
+
 export const isUnavailable = (
   value: LeveragedExposureQuote | Unavailable,
 ): value is Unavailable => "_tag" in value;
@@ -200,6 +280,8 @@ export interface InstrumentModel<State, Detail> {
   ) => number;
   /** Recover the typed detail from a quote's opaque `detail` field. */
   readonly decodeDetail: (quote: LeveragedExposureQuote) => Detail;
+  /** Which leverages this instrument can deliver from the given state. `quote` must agree with it. */
+  readonly support: (state: State, conventions: Conventions) => LeverageSupport;
 }
 
 export const DAYS_PER_YEAR = 365;

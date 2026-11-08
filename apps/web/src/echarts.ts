@@ -30,9 +30,9 @@ export const registerEcharts = () => {
 
 export const instrumentColor = (kind: InstrumentKind): string =>
   Match.value(kind).pipe(
-    Match.when('Perp', () => '#3b82f6'),
-    Match.when('SpotBorrow', () => '#10b981'),
-    Match.when('Option', () => '#f59e0b'),
+    Match.when('Perp', () => '#e5484d'),
+    Match.when('SpotBorrow', () => '#30a46c'),
+    Match.when('Option', () => '#3e7bfa'),
     Match.exhaustive,
   )
 
@@ -171,15 +171,30 @@ export type ChartOptionArgs = Readonly<{
   comparison: Comparison
 }>
 
+const unavailableOption = (reason: string): EChartsOption => ({
+  animation: false,
+  backgroundColor: 'transparent',
+  title: {
+    text: 'Not available at this leverage',
+    subtext: reason,
+    left: 'center',
+    top: 'middle',
+    textStyle: { color: '#71717a', fontSize: 13, fontWeight: 500 },
+    subtextStyle: { color: '#a1a1aa', fontSize: 11 },
+  },
+})
+
 export const makeChartOption = (args: ChartOptionArgs): Option.Option<EChartsOption> =>
   pipe(
     Array.findFirst(args.comparison.instruments, result => result.kind === args.kind),
     Option.map(result =>
-      Match.value(args.mode).pipe(
+      result.resolved._tag === 'Unattainable'
+        ? unavailableOption(result.resolved.reason)
+        : Match.value(args.mode).pipe(
         Match.when('Carry', () => carryOption(result)),
         Match.when('Payoff', () => payoffOption(result)),
         Match.when('Path', () => pathOption(result, args.comparison)),
         Match.exhaustive,
-      ),
+        ),
     ),
   )

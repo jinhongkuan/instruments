@@ -7,6 +7,7 @@ import { Message } from '../message'
 import type { Model } from '../model'
 import { chartCardView } from './chart'
 import { formatUsd } from './format'
+import { leverageSliderView } from './leverage'
 
 export const GITHUB_URL = 'https://github.com/jinhongkuan/instruments'
 
@@ -24,6 +25,7 @@ export const view = (model: Model, h: HtmlBuilder<Message>): Document => ({
         [
           heroView(model, h),
           framingTableView(h),
+          leverageSliderView(model, h),
           chartsSectionView(model, h),
           footerView(model, h),
         ],
@@ -168,7 +170,7 @@ const FRAMING_ROWS: ReadonlyArray<FramingRow> = [
     carry: 'premium paid upfront, decays with time',
     capital: 'premium only',
     ruin: 'expires worthless, but can never be liquidated',
-    dot: 'bg-chart-call',
+    dot: 'bg-chart-option',
   },
 ]
 
@@ -264,7 +266,7 @@ const chartsSectionView = (model: Model, h: HtmlBuilder<Message>): Html =>
               h.h2(
                 [h.Class('text-lg font-semibold tracking-tight')],
                 [
-                  `Long ${model.scenario.ticker} · ${formatUsd(model.scenario.capitalUsd)} · ${model.scenario.horizonDays} days from ${model.scenario.entryDate}`,
+                  `Long ${model.scenario.ticker} at ${model.scenario.leverage.toFixed(2)}x · ${formatUsd(model.scenario.capitalUsd)} · ${model.scenario.horizonDays} days from ${model.scenario.entryDate}`,
                 ],
               ),
               h.p([h.Class('text-sm text-muted-foreground')], [chartModeDescription(model.chartMode)]),
@@ -293,7 +295,7 @@ const footerView = (model: Model, h: HtmlBuilder<Message>): Html =>
         ? h.p(
             [h.Class('inline-flex w-fit items-center gap-2 rounded-md border border-dashed px-2 py-1')],
             [
-              h.span([h.Class('inline-block size-1.5 rounded-full bg-chart-call')], []),
+              h.span([h.Class('inline-block size-1.5 rounded-full bg-chart-option')], []),
               'Synthetic data. Every series on this page is generated from a seeded model so the layout can be judged before ingestion lands.',
             ],
           )

@@ -164,6 +164,16 @@ export const perpModel: InstrumentModel<PerpState, PerpQuoteDetail> = {
     state.funding.rate * (stepHours / state.funding.periodHours) * quote.achievedLeverage,
 
   decodeDetail: quote => S.decodeUnknownSync(PerpQuoteDetail)(quote.detail),
+
+  support: state =>
+    Option.match(maxLeverage(state.marginTiers), {
+      onNone: () => ({ _tag: 'None' as const, reason: 'No margin tiers observed' }),
+      onSome: tierMax => {
+        const tier = state.marginTiers[0]!
+        const marginCap = tier.maintenanceMarginFraction > 0 ? 1 / tier.maintenanceMarginFraction : tierMax
+        return { _tag: 'Continuous' as const, min: 1, max: Math.min(tierMax, marginCap * (1 - 1e-9)) }
+      },
+    }),
 }
 
 export const perpCarryOverDays = (ratePerPeriod: number, periodsPerYear: number, leverage: number, days: number): number =>

@@ -1,6 +1,6 @@
 import { Schema } from 'effect'
 
-import { InstrumentKind } from './instrument/common'
+import { InstrumentKind, LeverageSupport, Resolved } from './instrument/common'
 
 /** The three ways to hold leveraged long exposure. Rows of the README table. */
 export const INSTRUMENT_KINDS: ReadonlyArray<InstrumentKind> = ['Perp', 'SpotBorrow', 'Option']
@@ -11,6 +11,8 @@ export const Scenario = Schema.Struct({
   capitalUsd: Schema.Number,
   horizonDays: Schema.Number,
   entryDate: Schema.String,
+  /** Requested exposure / capital. Each instrument resolves it against its own support. */
+  leverage: Schema.Number,
 })
 export type Scenario = typeof Scenario.Type
 
@@ -37,6 +39,11 @@ export const InstrumentResult = Schema.Struct({
   kind: InstrumentKind,
   label: Schema.String,
   venue: Schema.String,
+  /** What this instrument can deliver for the asset; drives the slider bands. */
+  support: LeverageSupport,
+  /** How the requested leverage resolved: exact, snapped down, or unattainable (card greys out). */
+  resolved: Resolved,
+  /** Achieved leverage when resolved; 0 when unattainable. */
   exposureMultiple: Schema.Number,
   carryPctOfCapital: Schema.Array(SeriesPoint),
   payoffAtHorizon: Schema.Array(PayoffPoint),
