@@ -45,8 +45,8 @@ const baseOption = (): EChartsOption => ({
   animation: false,
   backgroundColor: 'transparent',
   tooltip: { trigger: 'axis', confine: true },
-  legend: { top: 4, right: 8, textStyle: { color: '#71717a', fontSize: 11 } },
-  grid: { left: 48, right: 20, top: 36, bottom: 32 },
+  legend: { bottom: 0, left: 'center', itemWidth: 14, itemHeight: 8, textStyle: { color: '#71717a', fontSize: 11 } },
+  grid: { left: 48, right: 20, top: 28, bottom: 56 },
   aria: { enabled: true },
 })
 

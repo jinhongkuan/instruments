@@ -155,6 +155,13 @@ const cumulative = (values: ReadonlyArray<number>): ReadonlyArray<number> =>
 const lastOr = (values: ReadonlyArray<number>, fallback: number): number =>
   Option.getOrElse(Array.last(values), () => fallback)
 
+/** Clamp equity to the capital floor and freeze it from the first ruin index onward. */
+const freezeAfterRuin = (equity: ReadonlyArray<number>, ruinIndex: Option.Option<number>, floor: number): ReadonlyArray<number> =>
+  Option.match(ruinIndex, {
+    onNone: () => Array.map(equity, value => Math.max(floor, value)),
+    onSome: index => Array.map(equity, (value, i) => (i >= index ? floor : Math.max(floor, value))),
+  })
+
 const toSeries = (values: ReadonlyArray<number>): ReadonlyArray<SeriesPoint> =>
   Array.map(values, (value, index) => ({ day: index + 1, value }))
 
@@ -186,11 +193,12 @@ const pricePath = (scenario: Scenario, random: () => number): ReadonlyArray<numb
 }
 
 const hourlyFundingPath = (days: number, random: () => number): ReadonlyArray<number> => {
-  const meanBpsPerHour = 1.25 / 100 / 100
+  // Hyperliquid interest floor: 0.01% per 8h = 0.00125% per hour (~11% APR). Premium noise on top.
+  const meanRatePerHour = 0.0000125
   return pipe(
     Array.makeBy(days, () => gaussian(random)),
-    Array.scan(meanBpsPerHour, (rate, shock) => {
-      const reverted = rate + 0.15 * (meanBpsPerHour - rate) + shock * 0.00006
+    Array.scan(meanRatePerHour, (rate, shock) => {
+      const reverted = rate + 0.15 * (meanRatePerHour - rate) + shock * 0.00002
       return Math.max(-0.0004, Math.min(0.0004, reverted))
     }),
     Array.drop(1),
@@ -216,15 +224,16 @@ const perp = (
     (rate, price) => rate * 24 * PERP_LEVERAGE * price * 100,
   )
   const carry = cumulative(dailyCarryPct)
-  const equity = Array.zipWith(
+  const rawEquity = Array.zipWith(
     prices,
     carry,
     (price, carryPct) => 100 + (price - 1) * PERP_LEVERAGE * 100 - carryPct,
   )
   const liquidationIndex = Array.findFirstIndex(
-    equity,
-    value => value <= PERP_LEVERAGE * PERP_MAINTENANCE_MARGIN * 100 * (1 + 0 * random()),
+    rawEquity,
+    value => value <= PERP_LEVERAGE * PERP_MAINTENANCE_MARGIN * 100,
   )
+  const equity = freezeAfterRuin(rawEquity, liquidationIndex, 0)
   const pathEvents: ReadonlyArray<PathEvent> = pipe(
     liquidationIndex,
     Array.fromOption,
@@ -293,7 +302,7 @@ const spotBorrow = (
     () => (baseApr / DAYS_PER_YEAR) * borrowedMultiple * 100,
   )
   const carry = cumulative(dailyCarryPct)
-  const equity = Array.zipWith(
+  const rawEquity = Array.zipWith(
     prices,
     carry,
     (price, carryPct) => 100 + (price - 1) * BORROW_LEVERAGE * 100 - carryPct,
@@ -303,6 +312,11 @@ const spotBorrow = (
     price => borrowedMultiple / (BORROW_LEVERAGE * price),
   )
   const liquidationIndex = Array.findFirstIndex(ltvPath, ltv => ltv >= BORROW_LIQUIDATION_LTV)
+  const recovered = Option.match(liquidationIndex, {
+    onNone: () => 0,
+    onSome: index => Math.max(0, (rawEquity[index] ?? 0) - 5 * BORROW_LEVERAGE),
+  })
+  const equity = freezeAfterRuin(rawEquity, liquidationIndex, recovered)
   const pathEvents: ReadonlyArray<PathEvent> = pipe(
     liquidationIndex,
     Array.fromOption,

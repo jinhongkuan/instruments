@@ -7,5 +7,6 @@ export default defineConfig({
   plugins: [tailwindcss(), foldkit()],
   optimizeDeps: {
     entries: ['src/entry.ts'],
+    exclude: ['@instruments/domain'],
   },
 })
