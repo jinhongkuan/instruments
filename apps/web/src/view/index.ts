@@ -17,7 +17,7 @@ const INPUT =
   'flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
 
 export const view = (model: Model, h: HtmlBuilder<Message>): Document => ({
-  title: `${model.scenario.ticker} · instruments`,
+  title: `${model.scenario.ticker} · Know what you are betting on`,
   body: h.div(
     [h.Class('min-h-screen bg-background text-foreground')],
     [
@@ -87,7 +87,7 @@ const heroView = (h: HtmlBuilder<Message>): Html =>
   h.section(
     [h.Class('max-w-3xl')],
     [
-      h.h1([h.Class('text-3xl font-semibold tracking-tight sm:text-4xl')], ['Same bet, different instrument.']),
+      h.h1([h.Class('text-3xl font-semibold tracking-tight sm:text-4xl')], ['Know what you are betting on']),
       h.p(
         [h.Class('mt-3 text-base text-muted-foreground')],
         [
@@ -102,13 +102,13 @@ const formatDays = (value: number): string => (value >= 365 ? `${(value / 365).t
 
 const slidersView = (model: Model, h: HtmlBuilder<Message>): Html =>
   h.section(
-    [h.Class('grid gap-6 rounded-xl border bg-card p-4 shadow-sm lg:grid-cols-2 lg:gap-10')],
+    [h.Class('grid gap-6 rounded-xl border bg-card p-4 shadow-sm')],
     [
       axisSliderView(
         {
           id: 'leverage',
           title: 'Leverage',
-          description: 'Exposure per unit of capital. Bars show where each instrument can price it; pins are listed contracts. Requests snap down, never up.',
+          description: 'Exposure per unit of capital. End marks show where each instrument stops pricing it; pins are listed contracts. Requests snap down, never up.',
           axis: LEVERAGE_AXIS,
           position: model.leveragePosition,
           value: model.scenario.leverage,
@@ -116,7 +116,9 @@ const slidersView = (model: Model, h: HtmlBuilder<Message>): Html =>
           ticks: [1, 2, 3, 5, 10, 20, 50],
           supportOf: result => result.support.leverage,
           instruments: model.comparison.instruments,
+          expanded: Option.exists(model.expandedAxis, axis => axis === 'leverage'),
           toMessage: position => Message.UpdatedLeverageSlider({ position }),
+          toggleMessage: Message.ToggledAxisExpanded({ axis: 'leverage' }),
         },
         h,
       ),
@@ -132,7 +134,9 @@ const slidersView = (model: Model, h: HtmlBuilder<Message>): Html =>
           ticks: [7, 14, 30, 90, 180, 365, 730],
           supportOf: result => result.support.horizonDays,
           instruments: model.comparison.instruments,
+          expanded: Option.exists(model.expandedAxis, axis => axis === 'horizon'),
           toMessage: position => Message.UpdatedHorizonSlider({ position }),
+          toggleMessage: Message.ToggledAxisExpanded({ axis: 'horizon' }),
         },
         h,
       ),

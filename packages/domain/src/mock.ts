@@ -27,8 +27,6 @@ const DAYS_PER_YEAR = 365
 
 const PERP_MAX_LEVERAGE = 40
 const PERP_MAINTENANCE_MARGIN = 0.0125
-const BORROW_MAX_LTV = 0.8
-const BORROW_LIQUIDATION_LTV = 0.825
 const CALL_IMPLIED_VOL = 0.65
 const CALL_DELTA = 0.5
 
@@ -37,8 +35,9 @@ const perpSupport: InstrumentSupport = {
   leverage: { _tag: 'Continuous', min: 1, max: PERP_MAX_LEVERAGE, pins: [] },
   horizonDays: anyHorizon,
 }
+// Unsecured credit at the observed rate: leverage is unbounded and nothing is liquidated.
 const borrowSupport: InstrumentSupport = {
-  leverage: { _tag: 'Continuous', min: 1, max: 1 + BORROW_MAX_LTV, pins: [] },
+  leverage: { _tag: 'Continuous', min: 1, max: 1000, pins: [] },
   horizonDays: anyHorizon,
 }
 
@@ -307,23 +306,16 @@ const spotBorrow = (
     carry,
     (price, carryPct) => 100 + (price - 1) * BORROW_LEVERAGE * 100 - carryPct,
   )
-  const ltvPath = Array.map(
-    prices,
-    price => borrowedMultiple / (BORROW_LEVERAGE * price),
-  )
-  const liquidationIndex = Array.findFirstIndex(ltvPath, ltv => ltv >= BORROW_LIQUIDATION_LTV)
-  const recovered = Option.match(liquidationIndex, {
-    onNone: () => 0,
-    onSome: index => Math.max(0, (rawEquity[index] ?? 0) - 5 * BORROW_LEVERAGE),
-  })
-  const equity = freezeAfterRuin(rawEquity, liquidationIndex, recovered)
+  // Unsecured: no liquidation. Equity can go through zero; the floor is the capital.
+  const insolventIndex = Array.findFirstIndex(rawEquity, value => value <= 0)
+  const equity = freezeAfterRuin(rawEquity, insolventIndex, 0)
   const pathEvents: ReadonlyArray<PathEvent> = pipe(
-    liquidationIndex,
+    insolventIndex,
     Array.fromOption,
     Array.map(index => ({
       day: index + 1,
-      kind: 'Liquidation' as const,
-      detail: `Loan-to-value crossed ${BORROW_LIQUIDATION_LTV * 100}%`,
+      kind: 'MarginCall' as const,
+      detail: 'Equity exhausted; the loan is now underwater',
     })),
   )
   const totalCarryPct = lastOr(carry, 0)
@@ -333,20 +325,19 @@ const spotBorrow = (
     BORROW_APR_SIGMA,
     BORROW_LEVERAGE - 1,
     scenario.horizonDays,
-    `p10–p90 of ${scenario.horizonDays}-day variable borrow windows (synthetic)`,
+    `p10–p90 of ${scenario.horizonDays}-day variable borrow windows, unlimited credit assumed (synthetic)`,
   )
   const payoff = linearPayoff(BORROW_LEVERAGE, band)
-  const ruinRatio = BORROW_LEVERAGE > 1 ? (BORROW_LEVERAGE - 1) / (BORROW_LEVERAGE * BORROW_LIQUIDATION_LTV) : 0
   return {
     kind: 'SpotBorrow',
     label: 'Spot + borrow',
-    venue: 'Aave',
+    venue: 'Unsecured credit',
     support: borrowSupport,
     resolved,
     horizonResolved,
     exposureMultiple: BORROW_LEVERAGE,
     carryBand: band,
-    ruinPriceRatio: BORROW_LEVERAGE > 1 ? Option.some(ruinRatio) : Option.none(),
+    ruinPriceRatio: Option.none(),
     fixedCounterfactual: Option.none(),
     carryPctOfCapital: toSeries(carry),
     payoffAtHorizon: payoff,

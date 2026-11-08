@@ -2,6 +2,7 @@ import { Schema } from 'effect'
 import { defineMessageUnion } from 'foldkit/message'
 
 import { ChartMode } from './chartMode'
+import { AxisId } from './model'
 
 export const Message = defineMessageUnion({
   UpdatedTickerInput: { value: Schema.String },
@@ -9,6 +10,7 @@ export const Message = defineMessageUnion({
   UpdatedHorizonSlider: { position: Schema.Number },
   SelectedChartMode: { mode: ChartMode },
   ToggledSeparateCarry: {},
+  ToggledAxisExpanded: { axis: AxisId },
   SucceededMountChart: { hostId: Schema.String },
   FailedMountChart: { reason: Schema.String },
   SucceededSyncChart: {},

@@ -16,9 +16,16 @@ export const Conventions = Schema.Struct({
   }),
   borrow: Schema.Struct({
     /**
-     * Deposit spot, borrow the quote asset against it, buy more spot, repeat.
-     * One loop reaches at most 1 + maxLtv. Deep-market assumption: every loop
-     * fills at the observed rate with no price impact.
+     * `Unsecured`: the holder has unlimited credit at the observed rate, so
+     * leverage is unbounded and nothing is liquidated; the loan is the paper's
+     * "against a loan" baseline. `Collateralized`: borrow against the spot
+     * position itself, capped by loan-to-value and liquidated past it.
+     */
+    creditModel: Schema.Literals(['Unsecured', 'Collateralized']),
+    /**
+     * Collateralized only. Deposit spot, borrow the quote asset against it,
+     * buy more spot, repeat. One loop reaches at most 1 + maxLtv. Deep-market
+     * assumption: every loop fills at the observed rate with no price impact.
      */
     maxLoops: Schema.Number,
     /** Whether supply yield on the held asset is netted against borrow cost. */
@@ -40,6 +47,6 @@ export type Conventions = typeof Conventions.Type
 export const DEFAULT_CONVENTIONS: Conventions = {
   version: '2026-11-v1',
   perp: { liquidateOnOracle: true, equityRecoveredOnLiquidation: 0 },
-  borrow: { maxLoops: 1, netSupplyYield: true },
+  borrow: { creditModel: 'Unsecured', maxLoops: 1, netSupplyYield: true },
   option: { leverageTolerance: 0.25, defaultRollSpreadFraction: 0.02, minDaysToExpiry: 7, amortization: 'Linear' },
 }

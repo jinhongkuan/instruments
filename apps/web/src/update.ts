@@ -89,6 +89,13 @@ export const update = (model: Model, message: Message) =>
 
     ToggledSeparateCarry: () => withSync(modifyFields(model, { separateCarry: separate => !separate })),
 
+    ToggledAxisExpanded: ({ axis }) => ({
+      model: modifyFields(model, {
+        expandedAxis: expanded =>
+          Option.exists(expanded, current => current === axis) ? Option.none() : Option.some(axis),
+      }),
+    }),
+
     SucceededMountChart: ({ hostId }) => {
       const nextModel = modifyFields(model, {
         mountedChartHostIds: hostIds =>

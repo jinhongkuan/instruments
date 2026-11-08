@@ -16,6 +16,7 @@ export const init: Runtime.ApplicationInit<Model, Message> = () => ({
     separateCarry: false,
     leveragePosition: sliderFromValue(LEVERAGE_AXIS, DEFAULT_SCENARIO.leverage),
     horizonPosition: sliderFromValue(HORIZON_AXIS, DEFAULT_SCENARIO.horizonDays),
+    expandedAxis: Option.none(),
     mountedChartHostIds: [],
     maybeChartError: Option.none(),
   },

@@ -1,6 +1,6 @@
 # instruments
 
-**Same bet, different instrument.** Type a ticker. See what it would have cost, and risked, to hold that exposure as a perpetual future, as spot bought with borrowed money, or as an option.
+**Know what you are betting on** Type a ticker. See what it would have cost, and risked, to hold that exposure as a perpetual future, as spot bought with borrowed money, or as an option.
 
 ## Why
 

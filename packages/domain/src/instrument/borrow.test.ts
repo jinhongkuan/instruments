@@ -58,7 +58,21 @@ describe("borrow formulas", () => {
   });
 });
 
-describe("borrowModel.quote", () => {
+const COLLATERALIZED = { ...C, borrow: { ...C.borrow, creditModel: "Collateralized" as const } };
+
+describe("borrowModel.quote (unsecured credit, default)", () => {
+  it("any leverage is attainable, nothing is liquidated, carry is interest on the borrowed leg", () => {
+    const q = borrowModel.quote(borrowState(), 5, 90, C);
+    if (isUnavailable(q)) throw new Error(q._tag);
+    expect(q.ruinMode).toBe("None");
+    expect(Option.isNone(q.ruinPriceRatio)).toBe(true);
+    expect(q.carryOnCapital).toBeCloseTo(0.08 * 4 - 0.01 * 5, 10);
+    expect(borrowModel.support(borrowState(), C).leverage).toMatchObject({ _tag: "Continuous", min: 1 });
+  });
+});
+
+describe("borrowModel.quote (collateralized)", () => {
+  const C = COLLATERALIZED;
   it("1.5x in one loop is Floating, Linear, Liquidation", () => {
     const q = borrowModel.quote(borrowState(), 1.5, 90, C);
     if (isUnavailable(q)) throw new Error(q._tag);

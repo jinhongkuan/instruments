@@ -128,11 +128,42 @@ export const carryOnCapital = (
 export const equityAtLiquidation = (leverage: number, liquidationRatio: number, penalty: number): number =>
   Math.max(-1, leverage * liquidationRatio * (1 - penalty) - (leverage - 1) - 1)
 
+/** Unsecured credit has no collateral cap; this is a sanity ceiling, not a market constraint. */
+export const UNSECURED_LEVERAGE_CAP = 1000
+
 export const borrowModel: InstrumentModel<BorrowState, BorrowQuoteDetail> = {
   kind: 'SpotBorrow',
 
   quote: (state, leverage, horizonDays, conventions): LeveragedExposureQuote | Unavailable => {
     const { collateral, rate } = state
+    if (conventions.borrow.creditModel === 'Unsecured') {
+      const carry = carryOnCapital(leverage, rate.borrowApr, rate.supplyApr, conventions.borrow.netSupplyYield)
+      const detail: BorrowQuoteDetail = {
+        debtPerCapital: leverage - 1,
+        loops: 0,
+        liquidationPriceRatio: 0,
+        liquidationPenalty: 0,
+        supplyAprOnCollateral: rate.supplyApr,
+      }
+      return {
+        kind: 'SpotBorrow',
+        venueId: state.venueId,
+        assetId: state.assetId,
+        observedAt: state.observedAt,
+        leverage,
+        achievedLeverage: leverage,
+        carryKind: Option.isSome(rate.fixedTermDays) ? 'Fixed' : 'Floating',
+        carryRate: leverage > 0 ? carry / leverage : 0,
+        carryOnCapital: carry,
+        payoffShape: 'Linear',
+        ruinMode: 'None',
+        ruinPriceRatio: Option.none(),
+        breakevenPriceRatio: linearBreakeven(leverage, carry, horizonDays),
+        capitalPerExposure: 1 / leverage,
+        detail,
+        conventionsVersion: conventions.version,
+      }
+    }
     const effectiveMaxLoops = collateral.loopingAllowed ? conventions.borrow.maxLoops : 1
     const ceiling = maxLeverage(collateral.maxLtv, effectiveMaxLoops)
     const loops = loopsRequired(leverage, collateral.maxLtv, effectiveMaxLoops)
@@ -185,8 +216,10 @@ export const borrowModel: InstrumentModel<BorrowState, BorrowQuoteDetail> = {
 
   support: (state, conventions) => {
     const loops = state.collateral.loopingAllowed ? conventions.borrow.maxLoops : 1
+    const leverageCap =
+      conventions.borrow.creditModel === 'Unsecured' ? UNSECURED_LEVERAGE_CAP : maxLeverage(state.collateral.maxLtv, loops)
     return {
-      leverage: { _tag: 'Continuous', min: 1, max: maxLeverage(state.collateral.maxLtv, loops), pins: [] },
+      leverage: { _tag: 'Continuous', min: 1, max: leverageCap, pins: [] },
       // Variable-rate markets run indefinitely; a fixed-term market is one maturity (roll beyond it is v2).
       horizonDays: Option.match(state.rate.fixedTermDays, {
         onNone: () => ({ _tag: 'Continuous' as const, min: 1, max: 3650, pins: [] }),
