@@ -197,92 +197,6 @@ const payoffOption = (comparison: Comparison, separateCarry: boolean): EChartsOp
 }
 
 // ---------------------------------------------------------------------------
-// Cumulative carry over the holding period, one line per instrument.
-// ---------------------------------------------------------------------------
-
-const dayAxis = (days: ReadonlyArray<number>) => ({
-  type: 'category' as const,
-  boundaryGap: false,
-  data: Array.map(days, day => `d${day}`),
-  axisLabel: { color: '#71717a' },
-})
-
-const carryOption = (comparison: Comparison): EChartsOption => {
-  const results = live(comparison)
-  const days = Array.map(results[0]?.carryPctOfCapital ?? [], point => point.day)
-  return {
-    ...baseOption(),
-    legend: { ...baseOption().legend, data: results.map(seriesName) },
-    xAxis: dayAxis(days),
-    yAxis: percentAxis('carry paid, % of capital'),
-    series: results.map(result => ({
-      name: seriesName(result),
-      type: 'line' as const,
-      showSymbol: false,
-      lineStyle: lineStyleFor(result),
-      itemStyle: { color: instrumentColor(result.kind) },
-      ...(result.kind === 'SpotBorrow' ? {} : { areaStyle: { color: instrumentColor(result.kind), opacity: 0.08 } }),
-      data: Array.map(result.carryPctOfCapital, point => round(point.value)),
-    })),
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Path: equity along the realized price path, with ruin days marked.
-// ---------------------------------------------------------------------------
-
-const pathOption = (comparison: Comparison): EChartsOption => {
-  const results = live(comparison)
-  const days = Array.map(results[0]?.equityPctOfCapital ?? [], point => point.day)
-  const eventLines = results.flatMap(result =>
-    Array.map(result.pathEvents, event => ({
-      xAxis: `d${event.day}`,
-      name: `${result.label}: ${event.kind}`,
-      lineStyle: { color: instrumentColor(result.kind), width: 1.25, type: 'dashed' as const },
-      label: { formatter: event.kind, color: instrumentColor(result.kind), fontSize: 10 },
-    })),
-  )
-  return {
-    ...baseOption(),
-    legend: { ...baseOption().legend, data: [...results.map(seriesName), 'price'] },
-    xAxis: dayAxis(days),
-    yAxis: [
-      percentAxis('equity, % of capital'),
-      {
-        type: 'value',
-        name: 'price / entry',
-        nameTextStyle: { color: '#71717a', fontSize: 11 },
-        axisLabel: { formatter: '{value}x', color: '#71717a' },
-        splitLine: { show: false },
-        scale: true,
-      },
-    ],
-    series: [
-      ...results.map((result, index) => ({
-        name: seriesName(result),
-        type: 'line' as const,
-        showSymbol: false,
-        lineStyle: lineStyleFor(result),
-        itemStyle: { color: instrumentColor(result.kind) },
-        data: Array.map(result.equityPctOfCapital, point => round(point.value)),
-        ...(index === 0
-          ? { markLine: { symbol: 'none', silent: true, data: eventLines as never } }
-          : {}),
-      })),
-      {
-        name: 'price',
-        type: 'line' as const,
-        yAxisIndex: 1,
-        showSymbol: false,
-        lineStyle: { width: 1.25, color: PRICE_COLOR, type: 'dotted' as const },
-        itemStyle: { color: PRICE_COLOR },
-        data: Array.map(comparison.priceRatio, point => round(point.value)),
-      },
-    ],
-  }
-}
-
-// ---------------------------------------------------------------------------
 // Ruin: probability of total loss by holding period, one line per instrument.
 // ---------------------------------------------------------------------------
 
@@ -340,8 +254,6 @@ export type ChartOptionArgs = Readonly<{
 export const makeChartOption = (args: ChartOptionArgs): EChartsOption =>
   Match.value(args.mode).pipe(
     Match.when('Payoff', () => payoffOption(args.comparison, args.separateCarry)),
-    Match.when('Carry', () => carryOption(args.comparison)),
-    Match.when('Path', () => pathOption(args.comparison)),
     Match.when('Ruin', () => ruinOption(args.comparison, args.horizonDays)),
     Match.exhaustive,
   )
