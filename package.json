@@ -1,0 +1,39 @@
+{
+  "name": "instruments",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "packageManager": "pnpm@10.13.1",
+  "scripts": {
+    "dev": "pnpm --filter web dev",
+    "build": "pnpm -r build",
+    "typecheck": "pnpm -r typecheck && tsc --noEmit -p tsconfig.json",
+    "test": "pnpm -r test",
+    "db": "./scripts/db",
+    "spec": "./spec/run.sh",
+    "infra:dev": "alchemy dev",
+    "deploy": "alchemy deploy",
+    "destroy": "alchemy destroy"
+  },
+  "devDependencies": {
+    "@alchemy.run/cloudflare": "2.0.0-beta.85",
+    "@alchemy.run/frontend-frameworks": "2.0.0-beta.85",
+    "@cloudflare/workers-types": "^4.20251108.0",
+    "@effect/platform-bun": "4.1.0",
+    "@effect/platform-node": "4.1.0",
+    "@types/node": "^22.18.0",
+    "alchemy": "2.0.0-beta.85",
+    "effect": "4.1.0",
+    "typescript": "^5.9.2",
+    "vite": "^8.3.1"
+  },
+  "pnpm": {
+    "overrides": {
+      "effect": "4.1.0",
+      "@effect/platform-browser": "4.1.0",
+      "@effect/platform-node": "4.1.0",
+      "@effect/platform-bun": "4.1.0"
+    }
+  }
+}

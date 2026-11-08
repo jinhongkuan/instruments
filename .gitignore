@@ -1,0 +1,14 @@
+node_modules/
+dist/
+build/
+.alchemy/
+.env
+.env.*
+!.env.example
+*.tsbuildinfo
+.DS_Store
+.vscode/
+.idea/
+coverage/
+_apalache-out/
+.quint/
