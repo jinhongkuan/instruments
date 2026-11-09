@@ -1,0 +1,12 @@
+# Cloud Build source upload: never ship secrets, state, or build output.
+.git
+.gitignore
+node_modules
+**/node_modules
+.env
+.env.*
+!.env.example
+.alchemy
+apps/web/.bundles
+apps/web/dist
+*.tsbuildinfo

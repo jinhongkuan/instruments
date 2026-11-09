@@ -32,6 +32,8 @@ const localBundles = (): Plugin => ({
 })
 
 export default defineConfig({
+  // GitHub Pages serves the project site under /<repo>/; the workflow sets BASE_PATH.
+  base: process.env.BASE_PATH ?? '/',
   plugins: [tailwindcss(), foldkit(), localBundles()],
   optimizeDeps: {
     entries: ['src/entry.ts'],

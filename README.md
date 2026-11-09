@@ -71,44 +71,54 @@ TEST_DATABASE_URL=postgres://… pnpm --filter @instruments/pipeline test  # inc
 
 ## Self-hosting
 
-The system needs four things, and only one file knows which platform provides them:
+The system needs four things, and the pipeline does not care who provides them:
 
-| Need | What it does | Cloudflare (default) | Anywhere else |
-|---|---|---|---|
-| Postgres 14+ | rolling 90 days, about 120 MB | any host, reached through Hyperdrive | any host |
-| A scheduler | ingest at :00, derive at :05, settle daily | Cron Triggers on the `Jobs` Worker | cron, systemd timers, Kubernetes CronJob |
-| Object storage | bundles plus `manifest.json`, and 90 days of raw responses | R2 bucket | a directory, S3, any static host |
-| A static host | the dashboard build | Workers static assets | nginx, Caddy, any CDN |
+| Need | What it does | GCP + GitHub Pages (deployed) | Cloudflare (alternative) | Anywhere else |
+|---|---|---|---|---|
+| Postgres 14+ | rolling 90 days, about 120 MB | Cloud SQL, private IP only | any host, through Hyperdrive | any host |
+| A scheduler | ingest at :00, derive at :05, settle daily | Cloud Scheduler → Cloud Run jobs | Cron Triggers on the `Jobs` Worker | cron, systemd timers, Kubernetes CronJob |
+| Object storage | bundles plus `manifest.json`, and 90 days of raw responses | Cloud Storage bucket, public read | R2 bucket | a directory, S3, any static host |
+| A static host | the dashboard build | GitHub Pages | Workers static assets | nginx, Caddy, any CDN |
 
-`packages/pipeline` is platform-neutral: its jobs take a Postgres connection, `fetch`, and an `ObjectStore` (one `put` method). `apps/api/src/Jobs.ts` (about 60 lines) is the only place that binds them to Cloudflare. Moving to another provider means writing that file again for its scheduler and object store, plus adding the provider's resources to `alchemy.run.ts`. Nothing else changes.
+`packages/pipeline` is platform-neutral: its jobs take a Postgres connection, `fetch`, and an `ObjectStore` (one `put` method), and `src/cli.ts` is its single entry point. On GCP the CLI runs unchanged in a container. On Cloudflare, `apps/api/src/Jobs.ts` (about 60 lines) binds the same jobs to Workers.
 
-### Option 1: Cloudflare, with Alchemy
-
-Alchemy needs Node 22.22.3+ or 24.11.1+ (`nvm use`).
-
-1. Sign in once: `pnpm exec alchemy profile edit`. Add a Cloudflare account; it opens the browser. Check it with `pnpm exec alchemy profile show`.
-2. Provision Postgres reachable from Cloudflare (Neon, Supabase, RDS, your own). Put its URL in `.env` as `HYPERDRIVE_ORIGIN_URL`, and set `ALCHEMY_PASSWORD`.
-3. Migrate and backfill it: `DATABASE_URL=$HYPERDRIVE_ORIGIN_URL pnpm db migrate`, then `DATABASE_URL=$HYPERDRIVE_ORIGIN_URL pnpm --filter @instruments/pipeline cli backfill`.
-4. `pnpm deploy`. The stack outputs `bundlesUrl`. Deploy again with `VITE_BUNDLES_URL` set to it, so the dashboard reads from the bucket. Only the first deploy needs this second pass.
-
-**Private database (recommended).** Keep Postgres off the internet and let Hyperdrive reach it through a Cloudflare Tunnel:
+### Option 1: GCP and GitHub Pages (what this repo deploys)
 
 ```
-Hyperdrive ─► Workers VPC service ─► Tunnel ─► cloudflared (small VM in the database's network) ─► Postgres private IP
+Cloud Scheduler ─► Cloud Run job (pipeline CLI) ─► Cloud SQL private IP        same VPC; the database has no public address
+                                                 ├► Cloud NAT static IP ─► Hyperliquid, Deribit, NY Fed
+                                                 └► gs://<project>-bundles ◄── the dashboard on GitHub Pages
 ```
 
-When `DB_PRIVATE_HOST` is set, `alchemy.run.ts` creates the Tunnel, the VPC service and Hyperdrive's private origin. `infra/gcp/setup.sh` provisions the GCP side: a private VPC, Cloud SQL Postgres 17 with no public IP, an `e2-micro` running `cloudflared`, and SSH reachable only through IAP. Expect roughly $10–20 a month.
+The jobs share the database's private network, so nothing bridges into it. Cloud NAT gives them one static egress IP, so Hyperliquid's per-IP rate limit is ours alone. Expect roughly $13 a month, mostly Cloud SQL.
 
 ```sh
-PROJECT=my-project infra/gcp/setup.sh database   # writes DB_PRIVATE_HOST, DB_NAME, DB_USER, DB_PASSWORD to .env
-pnpm deploy                                       # outputs dbTunnelToken
-TUNNEL_TOKEN=… PROJECT=my-project infra/gcp/setup.sh tunnel
-PROJECT=my-project infra/gcp/setup.sh forward    # localhost:15432 → Cloud SQL; run migrate and backfill against it
+gcloud auth login
+PROJECT=my-project infra/gcp/setup.sh database      # private VPC + Cloud SQL Postgres 17; writes DB_* to .env
+PROJECT=my-project infra/gcp/setup.sh jobs          # NAT, bucket, Secret Manager, image (Cloud Build), jobs, schedules
+PROJECT=my-project infra/gcp/setup.sh run migrate
+PROJECT=my-project infra/gcp/setup.sh run backfill  # 90 days for every perp, ~45 min
+PROJECT=my-project infra/gcp/setup.sh run derive
 ```
 
-The same shape works for AWS RDS: run `cloudflared` on an instance in the RDS VPC and set `DB_PRIVATE_HOST` to the RDS private IP.
+Then point the dashboard at the bucket and turn on Pages:
 
-### Option 2: one machine, no cloud account
+```sh
+gh variable set BUNDLES_URL --body https://storage.googleapis.com/my-project-bundles
+gh api -X POST repos/OWNER/REPO/pages -f build_type=workflow
+```
+
+`.github/workflows/pages.yml` builds and publishes the dashboard on every push to `main`. Re-run `setup.sh jobs` after changing the pipeline; it rebuilds the image and updates the jobs in place.
+
+### Option 2: Cloudflare, with Alchemy
+
+Alchemy needs Node 22.22.3+ or 24.11.1+ (`nvm use`). Sign in with `pnpm exec alchemy profile edit` using an **API token**, not the OAuth login: OAuth does not cover Hyperdrive or Tunnels. The token needs Workers Scripts, Workers R2 Storage, Hyperdrive and Cloudflare Tunnel (Edit), Connectivity Directory (Admin), and Account Settings (Read). Then:
+
+1. Provision Postgres reachable from Cloudflare. Put its URL in `.env` as `HYPERDRIVE_ORIGIN_URL` and set `ALCHEMY_PASSWORD`. For a private database, set `DB_PRIVATE_HOST`, `DB_NAME`, `DB_USER` and `DB_PASSWORD` instead. The stack then creates a Tunnel, a Workers VPC service and Hyperdrive's private origin, and you run `cloudflared` with the `dbTunnelToken` output on a host inside the database's network.
+2. Migrate and backfill: `DATABASE_URL=… pnpm --filter @instruments/pipeline cli migrate`, then `… cli backfill`.
+3. `pnpm deploy`. The stack outputs `bundlesUrl`. Build the dashboard with `VITE_BUNDLES_URL` set to it.
+
+### Option 3: one machine, no cloud account
 
 Any box with Node 22+, Postgres and cron. The dashboard and bundles are static files, so one web server serves both.
 

@@ -13,6 +13,20 @@
 import * as Cloudflare from '@alchemy.run/cloudflare'
 import { Effect, Redacted } from 'effect'
 
+// Alchemy imports this module before it loads .env, and the choice of origin
+// below is made at import time. Load the repo's .env here (existing variables
+// win). Inside a deployed Worker there is no such file and this does nothing.
+const loadRepoEnv = (): void => {
+  const load = (process as { loadEnvFile?: (path: string) => void }).loadEnvFile
+  if (typeof load !== 'function') return
+  try {
+    load(new URL('../../../../.env', import.meta.url).pathname)
+  } catch {
+    // No .env (CI, Worker runtime): rely on the real environment.
+  }
+}
+loadRepoEnv()
+
 const LOCAL_DATABASE_URL = 'postgres://instruments:instruments@localhost:5433/instruments'
 
 const parseOrigin = (url: string) => {
