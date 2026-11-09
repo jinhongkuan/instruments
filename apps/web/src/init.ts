@@ -1,8 +1,6 @@
 import { Option } from 'effect'
 import { Runtime } from 'foldkit'
 
-import { mockComparison } from '@instruments/domain'
-
 import { FetchManifest } from './command'
 import { DataSource } from './data'
 import type { Message } from './message'
@@ -13,7 +11,7 @@ export const init: Runtime.ApplicationInit<Model, Message> = () => ({
   model: {
     tickerInput: DEFAULT_SCENARIO.ticker,
     scenario: DEFAULT_SCENARIO,
-    comparison: mockComparison(DEFAULT_SCENARIO),
+    maybeComparison: Option.none(),
     dataSource: DataSource.LoadingMarketData(),
     maybeManifest: Option.none(),
     chartMode: 'Payoff',

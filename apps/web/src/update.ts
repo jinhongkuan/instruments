@@ -2,9 +2,9 @@ import { Array, Option } from 'effect'
 import { Command, Update } from 'foldkit'
 import { modifyFields } from 'foldkit/struct'
 
-import { type AxisSupport, type Manifest, type Scenario, comparisonFromBundle, mockComparison } from '@instruments/domain'
+import { type AxisSupport, type Comparison, type Manifest, type Scenario, comparisonFromBundle } from '@instruments/domain'
 
-import { FetchBundle, SyncChart } from './command'
+import { FetchBundle, FetchManifest, SyncChart } from './command'
 import { DataSource } from './data'
 import { Message } from './message'
 import type { Model } from './model'
@@ -29,47 +29,58 @@ const pinsOf = (support: AxisSupport): ReadonlyArray<number> =>
       ? [...support.pins.map(point => point.value), support.max]
       : []
 
+const instrumentsOf = (model: Model) =>
+  Option.match(model.maybeComparison, { onNone: () => [], onSome: comparison => comparison.instruments })
+
 const leveragePins = (model: Model): ReadonlyArray<number> =>
-  model.comparison.instruments.flatMap(result => pinsOf(result.support.leverage))
+  instrumentsOf(model).flatMap(result => pinsOf(result.support.leverage))
 
 const horizonPins = (model: Model): ReadonlyArray<number> =>
-  model.comparison.instruments.flatMap(result =>
+  instrumentsOf(model).flatMap(result =>
     result.support.horizonDays._tag === 'Continuous'
       ? result.support.horizonDays.pins.map(point => point.value)
       : pinsOf(result.support.horizonDays),
   )
 
-const syncChart = (model: Model, hostId: string): ReadonlyArray<Command.Command<Message>> => [
-  SyncChart({
-    hostId,
-    mode: model.chartMode,
-    comparison: model.comparison,
-    separateCarry: model.separateCarry,
-    horizonDays: model.scenario.horizonDays,
-  }),
-]
+const syncChart = (model: Model, hostId: string): ReadonlyArray<Command.Command<Message>> =>
+  Option.match(model.maybeComparison, {
+    onNone: () => [],
+    onSome: comparison => [
+      SyncChart({
+        hostId,
+        mode: model.chartMode,
+        comparison,
+        separateCarry: model.separateCarry,
+        horizonDays: model.scenario.horizonDays,
+      }),
+    ],
+  })
 
 const syncAllCharts = (model: Model): ReadonlyArray<Command.Command<Message>> =>
   Array.flatMap(model.mountedChartHostIds, hostId => syncChart(model, hostId))
 
 const withSync = (model: Model): UpdateReturn => ({ model, commands: syncAllCharts(model) })
 
-const comparisonFor = (dataSource: DataSource, scenario: Scenario) =>
+const comparisonFor = (dataSource: DataSource, scenario: Scenario): Option.Option<Comparison> =>
   dataSource._tag === 'Live' && dataSource.bundle.ticker === scenario.ticker
-    ? comparisonFromBundle(dataSource.bundle, scenario)
-    : mockComparison(scenario)
+    ? Option.some(comparisonFromBundle(dataSource.bundle, scenario))
+    : Option.none()
 
-const withScenario = (model: Model, scenario: Scenario): Model =>
-  modifyFields(model, {
+const withScenario = (model: Model, scenario: Scenario): Model => {
+  const maybeComparison = comparisonFor(model.dataSource, scenario)
+  return modifyFields(model, {
     scenario: () => scenario,
-    comparison: () => comparisonFor(model.dataSource, scenario),
+    maybeComparison: () => maybeComparison,
+    // Without data the chart panel is not rendered, so its host unmounts; it re-registers on remount.
+    mountedChartHostIds: hostIds => (Option.isNone(maybeComparison) ? [] : hostIds),
   })
+}
 
 const withDataSource = (model: Model, dataSource: DataSource): Model =>
   withScenario(modifyFields(model, { dataSource: () => dataSource }), model.scenario)
 
 const noMarketData = (ticker: string): DataSource =>
-  DataSource.Synthetic({ reason: `No market data for ${ticker}: it is not listed on Hyperliquid or Deribit.` })
+  DataSource.Unavailable({ reason: `${ticker} is not listed on Hyperliquid or Deribit, so there is nothing to price.`, retryable: false })
 
 /** Point the model at a ticker: fetch its bundle when the manifest lists it, otherwise say why it is synthetic. */
 const loadTicker = (model: Model, manifest: Manifest, ticker: string): UpdateReturn =>
@@ -147,7 +158,7 @@ export const update = (model: Model, message: Message) =>
       loadTicker(modifyFields(model, { maybeManifest: () => Option.some(manifest) }), manifest, model.scenario.ticker),
 
     FailedFetchManifest: ({ reason }) =>
-      withSync(withDataSource(model, DataSource.Synthetic({ reason: `Market data is unavailable (${reason}).` }))),
+      withSync(withDataSource(model, DataSource.Unavailable({ reason: `Market data could not be loaded (${reason}).`, retryable: true }))),
 
     SucceededFetchBundle: ({ bundle }) =>
       bundle.ticker !== model.scenario.ticker
@@ -160,5 +171,10 @@ export const update = (model: Model, message: Message) =>
     FailedFetchBundle: ({ ticker, reason }) =>
       ticker !== model.scenario.ticker
         ? { model }
-        : withSync(withDataSource(model, DataSource.Synthetic({ reason: `Could not load ${ticker} (${reason}).` }))),
+        : withSync(withDataSource(model, DataSource.Unavailable({ reason: `${ticker} could not be loaded (${reason}).`, retryable: true }))),
+
+    ClickedRetryMarketData: () => ({
+      model: withDataSource(model, DataSource.LoadingMarketData()),
+      commands: [FetchManifest()],
+    }),
   })

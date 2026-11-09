@@ -11,6 +11,6 @@ Read `README.md` for the framing. Layout:
 - `alchemy.run.ts`: the infrastructure program. Every Cloudflare resource is declared by the Worker that binds to it.
 - `scripts/db`: local Postgres helper (`pnpm db psql`, `pnpm db explain < query.sql`).
 
-Conventions: Effect everywhere, no `any`, Schemas for anything that crosses a boundary. Mock data lives only in `packages/domain/src/mock.ts`; it is the fallback for tickers without a bundle. Real data enters the dashboard only through `TickerBundle` (`packages/domain/src/bundle.ts`).
+Conventions: Effect everywhere, no `any`, Schemas for anything that crosses a boundary. The dashboard never shows synthetic numbers: without a live `TickerBundle` (`packages/domain/src/bundle.ts`) it shows the reason and, for load failures, a retry. `packages/domain/src/mock.ts` remains only for the Cloudflare API Worker's `/compare` demo route.
 
 Postgres rules for this repo: batch writes into a few multi-row statements; upserts skip unchanged rows (`IS DISTINCT FROM`); replace `latest_chain` with DELETE + INSERT in one transaction, never TRUNCATE; derive reads inside REPEATABLE READ READ ONLY; primary keys are the only indexes unless a measured query needs more.

@@ -11,7 +11,8 @@ export type AxisId = typeof AxisId.Type
 export const Model = Schema.Struct({
   tickerInput: Schema.String,
   scenario: Scenario,
-  comparison: Comparison,
+  /** The comparison for the current scenario; None while loading or when market data is unavailable. */
+  maybeComparison: Schema.Option(Comparison),
   /** Live bundle, still loading, or synthetic with the reason it is synthetic. */
   dataSource: DataSource,
   /** The latest published manifest: which tickers have real data, and where. */

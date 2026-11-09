@@ -21,5 +21,6 @@ export const Message = defineMessageUnion({
   FailedFetchManifest: { reason: Schema.String },
   SucceededFetchBundle: { bundle: TickerBundle },
   FailedFetchBundle: { ticker: Schema.String, reason: Schema.String },
+  ClickedRetryMarketData: {},
 })
 export type Message = typeof Message.Type

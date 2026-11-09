@@ -111,7 +111,7 @@ const slidersView = (model: Model, h: HtmlBuilder<Message>): Html =>
           formatValue: formatLeverage,
           ticks: [1, 2, 3, 5, 10, 20, 50],
           supportOf: result => result.support.leverage,
-          instruments: model.comparison.instruments,
+          instruments: instrumentsOf(model),
           expanded: Option.exists(model.expandedAxis, axis => axis === 'leverage'),
           toMessage: position => Message.UpdatedLeverageSlider({ position }),
           toggleMessage: Message.ToggledAxisExpanded({ axis: 'leverage' }),
@@ -129,7 +129,7 @@ const slidersView = (model: Model, h: HtmlBuilder<Message>): Html =>
           formatValue: formatDays,
           ticks: [1, 3, 7, 14, 30, 60],
           supportOf: result => result.support.horizonDays,
-          instruments: model.comparison.instruments,
+          instruments: instrumentsOf(model),
           expanded: Option.exists(model.expandedAxis, axis => axis === 'horizon'),
           toMessage: position => Message.UpdatedHorizonSlider({ position }),
           toggleMessage: Message.ToggledAxisExpanded({ axis: 'horizon' }),
@@ -174,6 +174,33 @@ const separateCarryToggleView = (separate: boolean, h: HtmlBuilder<Message>): Ht
     ['Show before carry'],
   )
 
+const instrumentsOf = (model: Model) =>
+  Option.match(model.maybeComparison, { onNone: () => [], onSome: comparison => comparison.instruments })
+
+/** Shown in place of the chart and cards when there is no live data: says why, never substitutes numbers. */
+const unavailablePanelView = (dataSource: DataSource, ticker: string, h: HtmlBuilder<Message>): Html =>
+  h.div(
+    [h.Class('flex h-[26rem] flex-col items-center justify-center gap-3 rounded-xl border border-dashed bg-card p-6 text-center')],
+    DataSource.match(dataSource, {
+      LoadingMarketData: () => [h.p([h.Class('text-sm text-muted-foreground')], [`Loading market data for ${ticker}…`])],
+      Live: () => [h.p([h.Class('text-sm text-muted-foreground')], [`Loading ${ticker}…`])],
+      Unavailable: ({ reason, retryable }) => [
+        h.p([h.Class('text-sm font-medium')], ['No market data to show']),
+        h.p([h.Class('max-w-md text-sm text-muted-foreground')], [reason]),
+        retryable
+          ? h.button(
+              [
+                h.Type('button'),
+                h.Class(`${BUTTON} h-8 border bg-background px-3 text-foreground hover:bg-accent`),
+                h.OnClick(Message.ClickedRetryMarketData()),
+              ],
+              ['Try again'],
+            )
+          : h.empty,
+      ],
+    }),
+  )
+
 const chartsSectionView = (model: Model, h: HtmlBuilder<Message>): Html =>
   h.section(
     [h.Id('compare'), h.Class('flex flex-col gap-4')],
@@ -200,11 +227,20 @@ const chartsSectionView = (model: Model, h: HtmlBuilder<Message>): Html =>
           ),
         ],
       ),
-      chartPanelView(model.chartMode, h),
-      h.div(
-        [h.Class('grid gap-4 lg:grid-cols-3')],
-        Array.map(model.comparison.instruments, result => statsCardView(result, model.comparison.synthetic, h)),
-      ),
+      Option.match(model.maybeComparison, {
+        onNone: () => unavailablePanelView(model.dataSource, model.scenario.ticker, h),
+        onSome: comparison =>
+          h.div(
+            [h.Class('flex flex-col gap-4')],
+            [
+              chartPanelView(model.chartMode, h),
+              h.div(
+                [h.Class('grid gap-4 lg:grid-cols-3')],
+                Array.map(comparison.instruments, result => statsCardView(result, comparison.synthetic, h)),
+              ),
+            ],
+          ),
+      }),
       Option.match(model.maybeChartError, {
         onNone: () => h.div([], []),
         onSome: reason => h.p([h.Class('text-sm text-destructive')], [`Chart error: ${reason}`]),
@@ -333,7 +369,7 @@ const statusBadge = (dotClass: string, text: string, h: HtmlBuilder<Message>): H
 /** Says where the numbers come from: live bundle and its sources' freshness, still loading, or synthetic and why. */
 const dataStatusView = (dataSource: DataSource, h: HtmlBuilder<Message>): Html =>
   DataSource.match(dataSource, {
-    LoadingMarketData: () => statusBadge('bg-muted-foreground', 'Loading market data. Showing synthetic data until it arrives.', h),
+    LoadingMarketData: () => statusBadge('bg-muted-foreground', 'Loading market data…', h),
     Live: ({ bundle }) =>
       h.div(
         [h.Class('flex flex-col gap-1')],
@@ -348,12 +384,7 @@ const dataStatusView = (dataSource: DataSource, h: HtmlBuilder<Message>): Html =
           ),
         ],
       ),
-    Synthetic: ({ reason }) =>
-      statusBadge(
-        'bg-chart-option',
-        `Synthetic data. ${reason} Every series is generated from a seeded model.`,
-        h,
-      ),
+    Unavailable: ({ reason }) => statusBadge('bg-destructive', `No market data. ${reason}`, h),
   })
 
 const githubStarButtonView = (h: HtmlBuilder<Message>): Html =>

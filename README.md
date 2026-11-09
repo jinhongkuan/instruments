@@ -28,7 +28,7 @@ For each instrument the dashboard shows three charts on shared axes:
 
 ## Status
 
-Early, with real data. An hourly pipeline ingests Hyperliquid perps (funding, prices, leverage caps), Deribit option chains and SOFR from the New York Fed, keeps a rolling 90 days in Postgres, and publishes one precomputed bundle per ticker. The dashboard loads a ticker's bundle once and runs the instrument models in the browser, so slider moves never touch the network. Tickers without a bundle fall back to the synthetic model, and the footer says which you are looking at.
+Early, with real data. An hourly pipeline ingests Hyperliquid perps (funding, prices, leverage caps), Deribit option chains and SOFR from the New York Fed, keeps a rolling 90 days in Postgres, and publishes one precomputed bundle per ticker. The dashboard loads a ticker's bundle once and runs the instrument models in the browser, so slider moves never touch the network. There is no synthetic fallback: a ticker without a market, or data that fails to load, shows why (with a retry for load failures) instead of numbers.
 
 ## How data flows
 

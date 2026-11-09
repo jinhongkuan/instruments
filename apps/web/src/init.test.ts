@@ -3,10 +3,11 @@ import { describe, expect, it } from 'vitest'
 import { init } from './init'
 
 describe('init', () => {
-  it('starts with one result per instrument on synthetic data', () => {
-    const { model } = init()
-    expect(model.comparison.instruments.map(result => result.kind)).toEqual(['Perp', 'SpotBorrow', 'Option'])
-    expect(model.comparison.synthetic).toBe(true)
+  it('starts with no numbers, loading market data, and no charts mounted', () => {
+    const { model, commands } = init()
+    expect(model.maybeComparison._tag).toBe('None')
+    expect(model.dataSource._tag).toBe('LoadingMarketData')
     expect(model.mountedChartHostIds).toEqual([])
+    expect(commands).toHaveLength(1)
   })
 })

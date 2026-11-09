@@ -34,42 +34,44 @@ const bundle: TickerBundle = {
   sources: [{ source: 'hyperliquid', asOf: '2026-11-09T05:00:00.000Z' }],
 }
 
-describe('market data loading', () => {
-  it('starts synthetic and asks for the manifest', () => {
-    const start = init()
-    expect(start.model.dataSource._tag).toBe('LoadingMarketData')
-    expect(start.model.comparison.synthetic).toBe(true)
-    expect(start.commands).toHaveLength(1)
-  })
+const comparisonOf = (model: ReturnType<typeof init>['model']) => {
+  if (model.maybeComparison._tag === 'None') throw new Error('expected a comparison')
+  return model.maybeComparison.value
+}
 
+describe('market data loading', () => {
   it('fetches the bundle once the manifest lists the ticker, then draws real data', () => {
-    const start = init().model
-    const listed = update(start, Message.SucceededFetchManifest({ manifest }))
+    const listed = update(init().model, Message.SucceededFetchManifest({ manifest }))
     expect(listed.model.dataSource._tag).toBe('LoadingMarketData')
+    expect(listed.model.maybeComparison._tag).toBe('None')
     expect(listed.commands?.length).toBeGreaterThan(0)
     const loaded = update(listed.model, Message.SucceededFetchBundle({ bundle }))
     expect(loaded.model.dataSource._tag).toBe('Live')
-    expect(loaded.model.comparison.synthetic).toBe(false)
-    expect(loaded.model.comparison.instruments[0]!.carryBand.basis).toMatch(/realized 14-day funding/)
+    expect(comparisonOf(loaded.model).synthetic).toBe(false)
+    expect(comparisonOf(loaded.model).instruments[0]!.carryBand.basis).toMatch(/realized 14-day funding/)
   })
 
   it('a slider move recomputes from the same bundle without a fetch', () => {
     const live = update(update(init().model, Message.SucceededFetchManifest({ manifest })).model, Message.SucceededFetchBundle({ bundle })).model
     const moved = update(live, Message.UpdatedLeverageSlider({ position: 0.5 }))
-    expect(moved.model.comparison.synthetic).toBe(false)
-    expect(moved.model.comparison.instruments[0]!.exposureMultiple).not.toBe(live.comparison.instruments[0]!.exposureMultiple)
+    expect(moved.commands?.some(command => command.name === 'FetchBundle') ?? false).toBe(false)
+    expect(comparisonOf(moved.model).instruments[0]!.exposureMultiple).not.toBe(comparisonOf(live).instruments[0]!.exposureMultiple)
   })
 
-  it('says why a ticker without listings is synthetic', () => {
+  it('a ticker with no market shows no numbers and offers no retry', () => {
     const listed = update(init().model, Message.SucceededFetchManifest({ manifest })).model
-    const unknown = update(listed, Message.UpdatedTickerInput({ value: 'ZZZ' }))
-    expect(unknown.model.dataSource._tag).toBe('Synthetic')
-    expect(unknown.model.comparison.synthetic).toBe(true)
+    const unknown = update(listed, Message.UpdatedTickerInput({ value: 'ZZZ' })).model
+    expect(unknown.maybeComparison._tag).toBe('None')
+    expect(unknown.dataSource).toMatchObject({ _tag: 'Unavailable', retryable: false })
   })
 
-  it('falls back to synthetic when the manifest cannot be fetched', () => {
-    const failed = update(init().model, Message.FailedFetchManifest({ reason: 'HTTP 404' }))
-    expect(failed.model.dataSource._tag).toBe('Synthetic')
+  it('a failed fetch shows no numbers and offers a retry that refetches the manifest', () => {
+    const failed = update(init().model, Message.FailedFetchManifest({ reason: 'HTTP 404' })).model
+    expect(failed.maybeComparison._tag).toBe('None')
+    expect(failed.dataSource).toMatchObject({ _tag: 'Unavailable', retryable: true })
+    const retried = update(failed, Message.ClickedRetryMarketData())
+    expect(retried.model.dataSource._tag).toBe('LoadingMarketData')
+    expect(retried.commands?.map(command => command.name)).toEqual(['FetchManifest'])
   })
 
   it('ignores a late bundle for a ticker the user already left', () => {
@@ -77,5 +79,6 @@ describe('market data loading', () => {
     const moved = update(listed, Message.UpdatedTickerInput({ value: 'ETH' })).model
     const late = update(moved, Message.SucceededFetchBundle({ bundle }))
     expect(late.model.dataSource._tag).toBe('LoadingMarketData')
+    expect(late.model.maybeComparison._tag).toBe('None')
   })
 })
