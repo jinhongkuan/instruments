@@ -30,7 +30,8 @@ export const borrowState = (overrides: Partial<BorrowState> = {}): BorrowState =
   venueId: "sofr",
   assetId: "ETH",
   observedAt: OBSERVED_AT,
-  rate: { observedAt: OBSERVED_AT, apr: 0.045, source: "SOFR", termDays: Option.some(90) },
+  // 1 Jan is a holiday, so the rate for Wed 31 Dec is published Fri 2 Jan around 08:00 ET.
+  rate: { effectiveDate: "2025-12-31", publishedAt: "2026-01-02T13:00:00.000Z", apr: 0.045, source: "SOFR", termDays: Option.none() },
   ...overrides,
 });
 

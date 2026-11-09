@@ -103,7 +103,7 @@ export const chartPanelView = (mode: ChartMode, h: HtmlBuilder<Message>): Html =
   )
 
 /** Per-instrument numbers under the chart. Greys out when the request could not be met. */
-export const statsCardView = (result: InstrumentResult, h: HtmlBuilder<Message>): Html =>
+export const statsCardView = (result: InstrumentResult, synthetic: boolean, h: HtmlBuilder<Message>): Html =>
   h.section(
     [
       h.Key(result.kind),
@@ -141,14 +141,43 @@ export const statsCardView = (result: InstrumentResult, h: HtmlBuilder<Message>)
                   : formatPercent(result.carryBand.mid),
                 h,
               ),
-              statView('Terminal PnL', formatPercent(result.summary.terminalPnlPct), h),
-              statView(
-                'Worst drawdown',
-                result.summary.liquidated ? 'liquidated' : formatPercent(result.summary.maxDrawdownPct),
-                h,
-              ),
+              ...(synthetic
+                ? [
+                    statView('Terminal PnL', formatPercent(result.summary.terminalPnlPct), h),
+                    statView(
+                      'Worst drawdown',
+                      result.summary.liquidated ? 'liquidated' : formatPercent(result.summary.maxDrawdownPct),
+                      h,
+                    ),
+                  ]
+                : [
+                    statView('PnL if price is flat', formatPercent(result.summary.terminalPnlPct), h),
+                    statView('Chance of losing it all', `${result.summary.ruinAtHorizonPct.toFixed(1)}%`, h),
+                  ]),
             ],
       ),
+      sourceView(result, h),
+    ],
+  )
+
+/** Where the card's numbers come from, and a warning when the market behind them is thin. */
+const sourceView = (result: InstrumentResult, h: HtmlBuilder<Message>): Html =>
+  h.div(
+    [h.Class('flex flex-col gap-1 border-t pt-2')],
+    [
+      h.p([h.Class('text-[11px] leading-snug text-muted-foreground')], [`Data: ${result.source.text}`]),
+      Option.match(result.source.lowLiquidity, {
+        onNone: () => h.empty,
+        onSome: reason =>
+          h.p(
+            [
+              h.Class(
+                'inline-flex w-fit items-center gap-1.5 rounded border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[11px] text-amber-700 dark:text-amber-300',
+              ),
+            ],
+            [h.span([h.Class('inline-block size-1.5 rounded-full bg-amber-500')]), `Low liquidity: ${reason}`],
+          ),
+      }),
     ],
   )
 

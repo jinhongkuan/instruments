@@ -12,3 +12,6 @@ build/
 coverage/
 _apalache-out/
 .quint/
+
+# Local bundles written by the pipeline CLI
+apps/web/.bundles/

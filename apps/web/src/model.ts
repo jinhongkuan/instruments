@@ -1,8 +1,9 @@
 import { Schema } from 'effect'
 
-import { Comparison, Scenario } from '@instruments/domain'
+import { Comparison, Manifest, Scenario } from '@instruments/domain'
 
 import { ChartMode } from './chartMode'
+import { DataSource } from './data'
 
 export const AxisId = Schema.Literals(['leverage', 'horizon'])
 export type AxisId = typeof AxisId.Type
@@ -11,6 +12,10 @@ export const Model = Schema.Struct({
   tickerInput: Schema.String,
   scenario: Scenario,
   comparison: Comparison,
+  /** Live bundle, still loading, or synthetic with the reason it is synthetic. */
+  dataSource: DataSource,
+  /** The latest published manifest: which tickers have real data, and where. */
+  maybeManifest: Schema.Option(Manifest),
   chartMode: ChartMode,
   /** Payoff chart: draw the pure price leg as a separate line so carry is visible as the gap. */
   separateCarry: Schema.Boolean,

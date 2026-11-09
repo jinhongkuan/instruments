@@ -12,6 +12,7 @@
   "dependencies": {
     "@instruments/db": "workspace:*",
     "@instruments/domain": "workspace:*",
+    "@instruments/pipeline": "workspace:*",
     "effect": "4.1.0"
   },
   "devDependencies": {

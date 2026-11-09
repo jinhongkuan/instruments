@@ -53,6 +53,9 @@ importers:
       '@instruments/domain':
         specifier: workspace:*
         version: link:../../packages/domain
+      '@instruments/pipeline':
+        specifier: workspace:*
+        version: link:../../packages/pipeline
       effect:
         specifier: 4.1.0
         version: 4.1.0
@@ -170,6 +173,40 @@ importers:
       fast-check:
         specifier: ^4.4.0
         version: 4.10.2
+      typescript:
+        specifier: ^5.9.2
+        version: 5.9.3
+      vitest:
+        specifier: ^5.0.2
+        version: 5.1.0(@types/node@22.20.5)(happy-dom@20.14.6)(vite@8.3.6(@types/node@22.20.5)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1))
+
+  packages/pipeline:
+    dependencies:
+      '@instruments/db':
+        specifier: workspace:*
+        version: link:../db
+      '@instruments/domain':
+        specifier: workspace:*
+        version: link:../domain
+      drizzle-orm:
+        specifier: ^0.45.4
+        version: 0.45.4(@cloudflare/workers-types@5.20261108.1)(postgres@3.4.9)
+      effect:
+        specifier: 4.1.0
+        version: 4.1.0
+      postgres:
+        specifier: ^3.4.7
+        version: 3.4.9
+    devDependencies:
+      '@types/node':
+        specifier: ^22.18.0
+        version: 22.20.5
+      fast-check:
+        specifier: ^4.4.0
+        version: 4.10.2
+      tsx:
+        specifier: ^4.20.0
+        version: 4.23.15
       typescript:
         specifier: ^5.9.2
         version: 5.9.3

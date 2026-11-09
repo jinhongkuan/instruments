@@ -8,6 +8,20 @@
       "when": 1794177121399,
       "tag": "0000_next_triathlon",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1794196887861,
+      "tag": "0001_benchmark_effective_date",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1794199391528,
+      "tag": "0002_ninety_day_store",
+      "breakpoints": true
     }
   ]
 }

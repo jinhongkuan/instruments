@@ -2,9 +2,10 @@ import { Array, Option } from 'effect'
 import { Command, Update } from 'foldkit'
 import { modifyFields } from 'foldkit/struct'
 
-import { type AxisSupport, type Scenario, mockComparison } from '@instruments/domain'
+import { type AxisSupport, type Manifest, type Scenario, comparisonFromBundle, mockComparison } from '@instruments/domain'
 
-import { SyncChart } from './command'
+import { FetchBundle, SyncChart } from './command'
+import { DataSource } from './data'
 import { Message } from './message'
 import type { Model } from './model'
 import {
@@ -53,20 +54,45 @@ const syncAllCharts = (model: Model): ReadonlyArray<Command.Command<Message>> =>
 
 const withSync = (model: Model): UpdateReturn => ({ model, commands: syncAllCharts(model) })
 
+const comparisonFor = (dataSource: DataSource, scenario: Scenario) =>
+  dataSource._tag === 'Live' && dataSource.bundle.ticker === scenario.ticker
+    ? comparisonFromBundle(dataSource.bundle, scenario)
+    : mockComparison(scenario)
+
 const withScenario = (model: Model, scenario: Scenario): Model =>
   modifyFields(model, {
     scenario: () => scenario,
-    comparison: () => mockComparison(scenario),
+    comparison: () => comparisonFor(model.dataSource, scenario),
   })
+
+const withDataSource = (model: Model, dataSource: DataSource): Model =>
+  withScenario(modifyFields(model, { dataSource: () => dataSource }), model.scenario)
+
+const noMarketData = (ticker: string): DataSource =>
+  DataSource.Synthetic({ reason: `No market data for ${ticker}: it is not listed on Hyperliquid or Deribit.` })
+
+/** Point the model at a ticker: fetch its bundle when the manifest lists it, otherwise say why it is synthetic. */
+const loadTicker = (model: Model, manifest: Manifest, ticker: string): UpdateReturn =>
+  Array.contains(manifest.tickers, ticker)
+    ? {
+        model: withDataSource(model, DataSource.LoadingMarketData()),
+        commands: [...syncAllCharts(model), FetchBundle({ prefix: manifest.prefix, ticker })],
+      }
+    : withSync(withDataSource(model, noMarketData(ticker)))
 
 export const update = (model: Model, message: Message) =>
   Message.match<UpdateReturn>(message, {
     UpdatedTickerInput: ({ value }) => {
       const ticker = normalizeTicker(value)
       const next = modifyFields(model, { tickerInput: () => value })
-      return ticker.length === 0 || ticker === model.scenario.ticker
-        ? { model: next }
-        : withSync(withScenario(next, { ...model.scenario, ticker }))
+      if (ticker.length === 0 || ticker === model.scenario.ticker) {
+        return { model: next }
+      }
+      const retargeted = withScenario(next, { ...model.scenario, ticker })
+      return Option.match(model.maybeManifest, {
+        onNone: () => withSync(retargeted),
+        onSome: manifest => loadTicker(retargeted, manifest, ticker),
+      })
     },
 
     UpdatedLeverageSlider: ({ position }) => {
@@ -116,4 +142,23 @@ export const update = (model: Model, message: Message) =>
     FailedSyncChart: ({ reason }) => ({
       model: modifyFields(model, { maybeChartError: () => Option.some(reason) }),
     }),
+
+    SucceededFetchManifest: ({ manifest }) =>
+      loadTicker(modifyFields(model, { maybeManifest: () => Option.some(manifest) }), manifest, model.scenario.ticker),
+
+    FailedFetchManifest: ({ reason }) =>
+      withSync(withDataSource(model, DataSource.Synthetic({ reason: `Market data is unavailable (${reason}).` }))),
+
+    SucceededFetchBundle: ({ bundle }) =>
+      bundle.ticker !== model.scenario.ticker
+        ? { model }
+        : Option.match(model.maybeManifest, {
+            onNone: () => ({ model }),
+            onSome: manifest => withSync(withDataSource(model, DataSource.Live({ manifest, bundle }))),
+          }),
+
+    FailedFetchBundle: ({ ticker, reason }) =>
+      ticker !== model.scenario.ticker
+        ? { model }
+        : withSync(withDataSource(model, DataSource.Synthetic({ reason: `Could not load ${ticker} (${reason}).` }))),
   })

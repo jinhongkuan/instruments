@@ -3,7 +3,7 @@ import type { Scenario } from '@instruments/domain'
 export const DEFAULT_SCENARIO: Scenario = {
   ticker: 'BTC',
   capitalUsd: 10_000,
-  horizonDays: 90,
+  horizonDays: 14,
   entryDate: '2026-01-01',
   leverage: 3,
 }
@@ -12,7 +12,8 @@ export const DEFAULT_SCENARIO: Scenario = {
 export type LogAxis = Readonly<{ min: number; max: number }>
 
 export const LEVERAGE_AXIS: LogAxis = { min: 1, max: 50 }
-export const HORIZON_AXIS: LogAxis = { min: 7, max: 730 }
+// Real funding and ruin history covers 90 days, enough for horizons up to about 30 days.
+export const HORIZON_AXIS: LogAxis = { min: 1, max: 60 }
 
 export const valueFromSlider = (axis: LogAxis, position: number): number =>
   Math.exp(Math.log(axis.min) + Math.min(1, Math.max(0, position)) * (Math.log(axis.max) - Math.log(axis.min)))

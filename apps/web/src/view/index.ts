@@ -3,6 +3,7 @@ import type { Document, Html } from 'foldkit/html'
 import { HtmlBuilder } from 'foldkit/html'
 
 import { CHART_MODES, type ChartMode, chartModeDescription, chartModeLabel } from '../chartMode'
+import { DataSource } from '../data'
 import { Message } from '../message'
 import type { Model } from '../model'
 import { HORIZON_AXIS, KNOWN_TICKERS, LEVERAGE_AXIS } from '../scenario'
@@ -10,6 +11,9 @@ import { axisSliderView } from './axis'
 import { chartPanelView, statsCardView } from './chart'
 
 export const GITHUB_URL = 'https://github.com/jinhongkuan/instruments'
+
+/** GitHub's star button with live count (github-btn, the widely used embed). Shows the count once the repo is public. */
+const GITHUB_STAR_BUTTON_URL = 'https://ghbtns.com/github-btn.html?user=jinhongkuan&repo=instruments&type=star&count=true&size=large'
 
 const BUTTON =
   'inline-flex h-9 items-center justify-center rounded-md px-4 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50'
@@ -69,15 +73,7 @@ const topBarView = (model: Model, h: HtmlBuilder<Message>): Html =>
               ),
             ],
           ),
-          h.a(
-            [
-              h.Href(GITHUB_URL),
-              h.Target('_blank'),
-              h.Rel('noopener'),
-              h.Class(`${BUTTON} h-8 shrink-0 border bg-background px-3 text-foreground hover:bg-accent`),
-            ],
-            ['GitHub ↗'],
-          ),
+          githubStarButtonView(h),
         ],
       ),
     ],
@@ -131,7 +127,7 @@ const slidersView = (model: Model, h: HtmlBuilder<Message>): Html =>
           position: model.horizonPosition,
           value: model.scenario.horizonDays,
           formatValue: formatDays,
-          ticks: [7, 14, 30, 90, 180, 365, 730],
+          ticks: [1, 3, 7, 14, 30, 60],
           supportOf: result => result.support.horizonDays,
           instruments: model.comparison.instruments,
           expanded: Option.exists(model.expandedAxis, axis => axis === 'horizon'),
@@ -207,7 +203,7 @@ const chartsSectionView = (model: Model, h: HtmlBuilder<Message>): Html =>
       chartPanelView(model.chartMode, h),
       h.div(
         [h.Class('grid gap-4 lg:grid-cols-3')],
-        Array.map(model.comparison.instruments, result => statsCardView(result, h)),
+        Array.map(model.comparison.instruments, result => statsCardView(result, model.comparison.synthetic, h)),
       ),
       Option.match(model.maybeChartError, {
         onNone: () => h.div([], []),
@@ -312,18 +308,60 @@ const footerView = (model: Model, h: HtmlBuilder<Message>): Html =>
   h.footer(
     [h.Class('flex flex-col gap-2 border-t pt-6 text-xs text-muted-foreground')],
     [
-      model.comparison.synthetic
-        ? h.p(
-            [h.Class('inline-flex w-fit items-center gap-2 rounded-md border border-dashed px-2 py-1')],
-            [
-              h.span([h.Class('inline-block size-1.5 rounded-full bg-chart-option')], []),
-              'Synthetic data. Every series on this page is generated from a seeded model so the layout can be judged before ingestion lands.',
-            ],
-          )
-        : h.div([], []),
+      dataStatusView(model.dataSource, h),
       h.p(
         [],
         ['MIT licensed. Source on ', h.a([h.Href(GITHUB_URL), h.Target('_blank'), h.Rel('noopener'), h.Class('underline')], ['GitHub']), '.'],
       ),
     ],
   )
+
+const SOURCE_LABELS: Record<string, string> = {
+  hyperliquid: 'Hyperliquid funding and prices',
+  deribit: 'Deribit option chain',
+  nyfed: 'SOFR (New York Fed)',
+}
+
+const formatAsOf = (iso: string): string => `${iso.slice(0, 10)} ${iso.slice(11, 16)} UTC`
+
+const statusBadge = (dotClass: string, text: string, h: HtmlBuilder<Message>): Html =>
+  h.p(
+    [h.Class('inline-flex w-fit items-center gap-2 rounded-md border border-dashed px-2 py-1')],
+    [h.span([h.Class(`inline-block size-1.5 rounded-full ${dotClass}`)]), text],
+  )
+
+/** Says where the numbers come from: live bundle and its sources' freshness, still loading, or synthetic and why. */
+const dataStatusView = (dataSource: DataSource, h: HtmlBuilder<Message>): Html =>
+  DataSource.match(dataSource, {
+    LoadingMarketData: () => statusBadge('bg-muted-foreground', 'Loading market data. Showing synthetic data until it arrives.', h),
+    Live: ({ bundle }) =>
+      h.div(
+        [h.Class('flex flex-col gap-1')],
+        [
+          statusBadge('bg-chart-perp', `Market data for ${bundle.ticker}, built ${formatAsOf(bundle.generatedAt)}.`, h),
+          h.p(
+            [],
+            [
+              Array.map(bundle.sources, source => `${SOURCE_LABELS[source.source] ?? source.source} as of ${formatAsOf(source.asOf)}`).join(' · ') +
+                (bundle.perp !== null && !bundle.perp.latestFundingSettled ? ' · latest funding hour is provisional until it settles' : ''),
+            ],
+          ),
+        ],
+      ),
+    Synthetic: ({ reason }) =>
+      statusBadge(
+        'bg-chart-option',
+        `Synthetic data. ${reason} Every series is generated from a seeded model.`,
+        h,
+      ),
+  })
+
+const githubStarButtonView = (h: HtmlBuilder<Message>): Html =>
+  h.iframe([
+    h.Src(GITHUB_STAR_BUTTON_URL),
+    h.Title('Star instruments on GitHub'),
+    h.Width('170'),
+    h.Height('30'),
+    h.Loading('lazy'),
+    h.Class('shrink-0 border-0'),
+  ])

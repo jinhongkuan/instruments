@@ -3,6 +3,8 @@ import { Runtime } from 'foldkit'
 
 import { mockComparison } from '@instruments/domain'
 
+import { FetchManifest } from './command'
+import { DataSource } from './data'
 import type { Message } from './message'
 import { Model } from './model'
 import { DEFAULT_SCENARIO, HORIZON_AXIS, LEVERAGE_AXIS, sliderFromValue } from './scenario'
@@ -12,6 +14,8 @@ export const init: Runtime.ApplicationInit<Model, Message> = () => ({
     tickerInput: DEFAULT_SCENARIO.ticker,
     scenario: DEFAULT_SCENARIO,
     comparison: mockComparison(DEFAULT_SCENARIO),
+    dataSource: DataSource.LoadingMarketData(),
+    maybeManifest: Option.none(),
     chartMode: 'Payoff',
     separateCarry: false,
     leveragePosition: sliderFromValue(LEVERAGE_AXIS, DEFAULT_SCENARIO.leverage),
@@ -20,4 +24,5 @@ export const init: Runtime.ApplicationInit<Model, Message> = () => ({
     mountedChartHostIds: [],
     maybeChartError: Option.none(),
   },
+  commands: [FetchManifest()],
 })

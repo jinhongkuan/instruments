@@ -1,6 +1,6 @@
 import { Schema } from 'effect'
 
-import { CarryKind, InstrumentKind, InstrumentSupport, Resolved } from './instrument/common'
+import { CarryKind, InstrumentKind, InstrumentSupport, LiquidityClass, Resolved } from './instrument/common'
 
 /** The three ways to hold leveraged long exposure. Rows of the README table. */
 export const INSTRUMENT_KINDS: ReadonlyArray<InstrumentKind> = ['Perp', 'SpotBorrow', 'Option']
@@ -56,10 +56,23 @@ export const PathEvent = Schema.Struct({
 })
 export type PathEvent = typeof PathEvent.Type
 
+/**
+ * Where an instrument's numbers come from, shown under its card. A Broad
+ * venue (lists almost anything, little volume) or thin trading on a Deep one
+ * sets `lowLiquidity` with the reason: priced, but maybe not at size.
+ */
+export const DataSourceNote = Schema.Struct({
+  text: Schema.String,
+  liquidityClass: LiquidityClass,
+  lowLiquidity: Schema.Option(Schema.String),
+})
+export type DataSourceNote = typeof DataSourceNote.Type
+
 export const InstrumentResult = Schema.Struct({
   kind: InstrumentKind,
   label: Schema.String,
   venue: Schema.String,
+  source: DataSourceNote,
   /** What this instrument can deliver for the asset on each axis; drives the slider bands. */
   support: InstrumentSupport,
   /** How the requested leverage resolved: exact, snapped down, or unattainable (card greys out, fallback shown). */
@@ -87,6 +100,8 @@ export const InstrumentResult = Schema.Struct({
     terminalPnlPct: Schema.Number,
     maxDrawdownPct: Schema.Number,
     liquidated: Schema.Boolean,
+    /** Chance (0–100) of losing the whole position by the horizon, from ruinProbabilityByHorizon. */
+    ruinAtHorizonPct: Schema.Number,
   }),
 })
 export type InstrumentResult = typeof InstrumentResult.Type

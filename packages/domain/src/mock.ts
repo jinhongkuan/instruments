@@ -62,6 +62,12 @@ const optionSupport = (random: () => number): InstrumentSupport => ({
 
 const TOLERANCE = DEFAULT_CONVENTIONS.option.leverageTolerance
 
+const SYNTHETIC_SOURCE: InstrumentResult['source'] = {
+  text: 'Synthetic model: no market data behind this card',
+  liquidityClass: 'Deep',
+  lowLiquidity: Option.none(),
+}
+
 export const RUIN_HORIZONS: ReadonlyArray<number> = [7, 14, 30, 60, 90, 120, 180, 270, 365, 540, 730]
 
 /** Standard normal CDF via the Abramowitz–Stegun erf approximation (max error ~1.5e-7). */
@@ -100,6 +106,15 @@ const optionRuinByHorizon = (moneyness: number, sigma: number): ReadonlyArray<Se
     const d = (Math.log(moneyness) + (sigma * sigma * years) / 2) / (sigma * Math.sqrt(years))
     return { day: days, value: normalCdf(d) }
   })
+
+/** Ruin probability at an arbitrary horizon, linear between the computed days. */
+const ruinAtDays = (curve: ReadonlyArray<SeriesPoint>, days: number): number => {
+  const below = [...curve].reverse().find(point => point.day <= days)
+  const above = curve.find(point => point.day >= days)
+  if (below === undefined) return above?.value ?? 0
+  if (above === undefined || above.day === below.day) return below.value
+  return below.value + ((days - below.day) / (above.day - below.day)) * (above.value - below.value)
+}
 
 const zeroRuinByHorizon: ReadonlyArray<SeriesPoint> = Array.map(RUIN_HORIZONS, days => ({ day: days, value: 0 }))
 
@@ -147,6 +162,7 @@ const unavailable = (
   kind,
   label,
   venue,
+  source: SYNTHETIC_SOURCE,
   support,
   resolved,
   horizonResolved,
@@ -158,7 +174,7 @@ const unavailable = (
   ruinProbabilityByHorizon: [],
   equityPctOfCapital: [],
   pathEvents: [],
-  summary: { totalCarryPct: 0, terminalPnlPct: 0, maxDrawdownPct: 0, liquidated: false },
+  summary: { totalCarryPct: 0, terminalPnlPct: 0, maxDrawdownPct: 0, liquidated: false, ruinAtHorizonPct: 0 },
 })
 
 const hashString = (value: string): number =>
@@ -296,10 +312,12 @@ const perp = (
   const ruinRatio = PERP_LEVERAGE > 1 ? (1 - 1 / PERP_LEVERAGE) / (1 - PERP_MAINTENANCE_MARGIN) : 0
   const maybeRuin = PERP_LEVERAGE > 1 ? Option.some(ruinRatio) : Option.none()
   const payoff = linearPayoff(PERP_LEVERAGE, band, maybeRuin)
+  const perpRuin = perpRuinByHorizon(PERP_LEVERAGE, assetVolatility(scenario.ticker), 0.0000125 * 8760)
   return {
     kind: 'Perp',
     label: 'Perpetual future',
     venue: 'Hyperliquid',
+    source: SYNTHETIC_SOURCE,
     support: perpSupport,
     resolved,
     horizonResolved,
@@ -308,7 +326,7 @@ const perp = (
     ruinPriceRatio: maybeRuin,
     carryPctOfCapital: toSeries(carry),
     payoffAtHorizon: payoff,
-    ruinProbabilityByHorizon: perpRuinByHorizon(PERP_LEVERAGE, assetVolatility(scenario.ticker), 0.0000125 * 8760),
+    ruinProbabilityByHorizon: perpRuin,
     equityPctOfCapital: toSeries(equity),
     pathEvents,
     summary: {
@@ -316,6 +334,7 @@ const perp = (
       terminalPnlPct: lastOr(equity, 100) - 100,
       maxDrawdownPct: maxDrawdown(equity),
       liquidated: pathEvents.length > 0,
+      ruinAtHorizonPct: ruinAtDays(perpRuin, scenario.horizonDays) * 100,
     },
   }
 }
@@ -362,6 +381,7 @@ const spotBorrow = (
     kind: 'SpotBorrow',
     label: 'Spot + borrow (benchmark)',
     venue: 'Dollar rate, unlimited credit',
+    source: SYNTHETIC_SOURCE,
     support: borrowSupport,
     resolved,
     horizonResolved,
@@ -378,6 +398,7 @@ const spotBorrow = (
       terminalPnlPct: lastOr(equity, 100) - 100,
       maxDrawdownPct: maxDrawdown(equity),
       liquidated: pathEvents.length > 0,
+      ruinAtHorizonPct: 0,
     },
   }
 }
@@ -437,10 +458,12 @@ const call = (scenario: Scenario, prices: ReadonlyArray<number>, random: () => n
       high: intrinsic - band.low,
     }
   })
+  const optionRuin = optionRuinByHorizon(1, assetVolatility(scenario.ticker))
   return {
     kind: 'Option',
     label: 'Call option',
     venue: 'Deribit',
+    source: SYNTHETIC_SOURCE,
     support,
     resolved,
     horizonResolved,
@@ -449,7 +472,7 @@ const call = (scenario: Scenario, prices: ReadonlyArray<number>, random: () => n
     ruinPriceRatio: Option.none(),
     carryPctOfCapital: toSeries(carry),
     payoffAtHorizon: payoff,
-    ruinProbabilityByHorizon: optionRuinByHorizon(1, assetVolatility(scenario.ticker)),
+    ruinProbabilityByHorizon: optionRuin,
     equityPctOfCapital: toSeries(equity),
     pathEvents,
     summary: {
@@ -457,6 +480,7 @@ const call = (scenario: Scenario, prices: ReadonlyArray<number>, random: () => n
       terminalPnlPct: lastOr(equity, 0) - 100,
       maxDrawdownPct: maxDrawdown(equity),
       liquidated: false,
+      ruinAtHorizonPct: ruinAtDays(optionRuin, scenario.horizonDays) * 100,
     },
   }
 }

@@ -9,6 +9,7 @@ import {
   linearBreakeven,
   linearNetPayoff,
 } from './common'
+import { LocalDate } from './calendar'
 
 // ---------------------------------------------------------------------------
 // Spot + borrow, as a BENCHMARK. The holder is assumed to have unlimited
@@ -19,9 +20,17 @@ import {
 // market is modeled; the only input is the rate.
 // ---------------------------------------------------------------------------
 
-/** A dollar interest rate observation: SOFR, a T-bill yield, or a stablecoin term rate. */
+/**
+ * A dollar interest rate observation: SOFR, a T-bill yield, or a stablecoin term rate.
+ * A published rate describes one business day and applies until the next one, so
+ * Friday's SOFR covers the weekend. Whether it is late is decided by the source's
+ * publication schedule (see `publication.ts`), not by its age.
+ */
 export const BenchmarkRate = Schema.Struct({
-  observedAt: Schema.String,
+  /** The business day the rate describes. */
+  effectiveDate: LocalDate,
+  /** When we first saw it. For SOFR this is at least one business day after `effectiveDate`. */
+  publishedAt: Schema.String,
   /** Annualized, simple interest. */
   apr: Schema.Number,
   /** Where the number came from, e.g. "SOFR", "US 3M T-bill", "USDC 90d term". */
@@ -44,6 +53,8 @@ export const BorrowQuoteDetail = Schema.Struct({
   debtPerCapital: Schema.Number,
   rateSource: Schema.String,
   rateApr: Schema.Number,
+  /** Business day the rate describes, so the UI can say "rate for Thu 5 Nov" rather than an age. */
+  rateEffectiveDate: LocalDate,
 })
 export type BorrowQuoteDetail = typeof BorrowQuoteDetail.Type
 
@@ -71,6 +82,7 @@ export const borrowModel: InstrumentModel<BorrowState, BorrowQuoteDetail> = {
       debtPerCapital: leverage - 1,
       rateSource: state.rate.source,
       rateApr: state.rate.apr,
+      rateEffectiveDate: state.rate.effectiveDate,
     }
     return {
       kind: 'SpotBorrow',
